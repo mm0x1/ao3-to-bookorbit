@@ -199,6 +199,7 @@ def work_page(
     epub_href: str | None = None,
     kudos: str = "68",
     rating: str | None = None,
+    chapters: str = "3/3",
 ) -> str:
     href = epub_href or f"/downloads/{work_id}/Example.epub?updated_at=1700000000&amp;view=full"
     rating_row = (
@@ -216,7 +217,7 @@ def work_page(
 <dt class="published">Published:</dt><dd class="published">2018-06-01</dd>
 <dt class="status">Completed:</dt><dd class="status">2018-09-14</dd>
 <dt class="words">Words:</dt><dd class="words">1,315</dd>
-<dt class="chapters">Chapters:</dt><dd class="chapters">3/3</dd>
+<dt class="chapters">Chapters:</dt><dd class="chapters">{chapters}</dd>
 <dt class="comments">Comments:</dt><dd class="comments">4</dd>
 <dt class="kudos">Kudos:</dt><dd class="kudos">{kudos}</dd>
 <dt class="bookmarks">Bookmarks:</dt><dd class="bookmarks"><a>6</a></dd>

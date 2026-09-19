@@ -64,8 +64,8 @@ Duplicate links across files are fine: they are counted and collapsed.
 Preview the plan first, then run it:
 
 ```sh
-python3 download.py --dry-run
-python3 download.py
+python3 download_fics.py --dry-run
+python3 download_fics.py
 ```
 
 The plan shows how many links there are, how many are duplicates, how many are
@@ -83,7 +83,7 @@ A run of tens of thousands of works takes days. Start it in the background and
 follow the log:
 
 ```sh
-nohup python3 download.py &
+nohup python3 download_fics.py &
 tail -f "$(ls -t ~/.local/share/ao3-calibre-backfill/logs/download-*.log | head -1)"
 ```
 

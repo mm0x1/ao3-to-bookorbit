@@ -3,7 +3,7 @@
 Deliberately a teacher rather than a wrapper. Every flow prints the exact
 command it would run before offering to run it, because the commands are what
 the guides in ``docs/`` document and what an unattended run needs. Nothing here
-is required: ``download.py`` and ``backfill.py`` behave exactly as they always
+is required: ``download_fics.py`` and ``backfill.py`` behave exactly as they always
 have, with or without this screen.
 """
 
@@ -40,7 +40,7 @@ SUMMARY = (
 
 DOCS = (
     ("docs/TUTORIAL.md", "the whole run, end to end"),
-    ("docs/DOWNLOADING.md", "every download.py option, and unattended runs"),
+    ("docs/DOWNLOADING.md", "every download_fics.py option, and unattended runs"),
     ("docs/BACKFILL.md", "every backfill.py subcommand"),
     ("docs/BOOKORBIT.md", "publishing to a BookOrbit library"),
     ("docs/CONFIGURATION.md", ".env keys, paths, and the SSH alias"),
@@ -160,8 +160,8 @@ def flows(library: Path | None = None) -> tuple[Flow, ...]:
                 "word count and readability score, and writes it all into the file.",
                 "The dry run shows the plan and an estimated finish time, and asks for nothing.",
             ),
-            commands=("python3 download.py --dry-run", "python3 download.py"),
-            preview="python3 download.py --dry-run",
+            commands=("python3 download_fics.py --dry-run", "python3 download_fics.py"),
+            preview="python3 download_fics.py --dry-run",
         ),
         Flow(
             "Import into Calibre",

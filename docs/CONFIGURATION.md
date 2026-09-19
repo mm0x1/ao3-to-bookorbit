@@ -20,7 +20,7 @@ registered with the logger on load, which redacts them from every later line,
 including the ones written to the failure log.
 
 ```sh
-# AO3, for download.py and backfill.py fetch
+# AO3, for download_fics.py and backfill.py fetch
 AO3_USERNAME=
 AO3_PASSWORD=
 
@@ -44,12 +44,12 @@ BACKUP_DIR=
 
 | Key | Needed by | Notes |
 | --- | --- | --- |
-| `AO3_USERNAME`, `AO3_PASSWORD` | `download.py`, `backfill.py fetch`, `check-auth` | An ordinary AO3 account. Nothing here posts, comments or kudos. |
+| `AO3_USERNAME`, `AO3_PASSWORD` | `download_fics.py`, `backfill.py fetch`, `check-auth` | An ordinary AO3 account. Nothing here posts, comments or kudos. |
 | `CALIBRE_LIBRARY` | `archiver.py` only | The path to your Calibre library, so the front door can check it and fill it into the commands it prints. Every `backfill.py` command still takes `--library` itself. |
-| `BOOKORBIT_URL` | `send_to_server.py`, `bookorbit-sync` | A bare host (`myserver:8080`) or a full API root. Empty means BookOrbit is simply not in use. |
-| `BOOKORBIT_USERNAME`, `BOOKORBIT_PASSWORD` | `send_to_server.py`, `bookorbit-sync` | A dedicated account with **Edit metadata** and **Download**, nothing more. See [docs/BOOKORBIT.md](BOOKORBIT.md#credentials). |
-| `BOOKORBIT_TOKEN` | `send_to_server.py`, `bookorbit-sync` | An `accessToken` instead of an account. Expires after `JWT_EXPIRES_IN`, 15 minutes by default. |
-| `BOOKORBIT_LIBRARY_ID` | `send_to_server.py`, `bookorbit-sync` | Look at one BookOrbit library only. Optional. |
+| `BOOKORBIT_URL` | `send_to_server.py`, `download_fics.py`, `bookorbit-sync` | A bare host (`myserver:8080`) or a full API root. Empty means BookOrbit is simply not in use: `send_to_server.py` then stops, and `download_fics.py` treats every work as new. |
+| `BOOKORBIT_USERNAME`, `BOOKORBIT_PASSWORD` | `send_to_server.py`, `download_fics.py`, `bookorbit-sync` | A dedicated account with **Edit metadata** and **Download**, nothing more. See [docs/BOOKORBIT.md](BOOKORBIT.md#credentials). |
+| `BOOKORBIT_TOKEN` | `send_to_server.py`, `download_fics.py`, `bookorbit-sync` | An `accessToken` instead of an account. Expires after `JWT_EXPIRES_IN`, 15 minutes by default. |
+| `BOOKORBIT_LIBRARY_ID` | `send_to_server.py`, `download_fics.py`, `bookorbit-sync` | Look at one BookOrbit library only. Optional. |
 | `SERVER` | `send_to_server.py`, `backup_server.py` | The server's alias in `~/.ssh/config`, such as `myserver`. See [the SSH alias](#the-ssh-alias). |
 | `SERVER_BOOKORBIT_DIR` | `send_to_server.py`, `backup_server.py` | BookOrbit's folder on the server, as an absolute path such as `/path/to/bookorbit`. The backup copies all of it. |
 | `SERVER_LIBRARY_DIR` | `send_to_server.py` | The folder inside `SERVER_BOOKORBIT_DIR` that new books are added to, such as `/path/to/bookorbit/fanfiction`. It must be inside it, so the backup covers everything sent. |
@@ -83,7 +83,7 @@ which is on this PC. [docs/SERVER.md](SERVER.md) covers both commands.
 
 In order of precedence:
 
-1. **The process environment.** `AO3_USERNAME=… AO3_PASSWORD=… python3 download.py`
+1. **The process environment.** `AO3_USERNAME=… AO3_PASSWORD=… python3 download_fics.py`
    overrides the file, which is useful for a one-off run or a systemd unit.
 2. **`.env`** in the repository root.
 3. **`personal.ini`**, the legacy file, for AO3 credentials only:
@@ -94,7 +94,7 @@ In order of precedence:
    password =
    ```
 
-   `download.py` falls back to it; the backfill does not. Copy it from
+   `download_fics.py` falls back to it; the backfill does not. Copy it from
    `personal.ini.example` if you already have one from another tool.
 
 Whichever wins, every run logs *which source* supplied the pair — never the

@@ -206,6 +206,36 @@ class CalibreProcessDetectionTest(unittest.TestCase):
         self.assertTrue(calibre_library._proc_command_lines())
 
 
+class RunningProgramsTest(unittest.TestCase):
+    """The same check finds the link harvester, which runs as a Python script."""
+
+    def find(self, *argvs):
+        return calibre_library.running_programs(
+            lambda name: name in {"ao3downloader.py", "ao3downloader"},
+            lambda: [(100 + index, list(argv)) for index, argv in enumerate(argvs)],
+        )
+
+    def test_the_harvester_is_found_however_it_is_started(self):
+        found = self.find(
+            ["python", "ao3downloader.py"],
+            ["/usr/bin/python3", "/home/example/ao3downloader/ao3downloader.py"],
+            ["python3", "-m", "ao3downloader"],
+        )
+
+        self.assertEqual(len(found), 3)
+        self.assertEqual(found[0], "100 python ao3downloader.py")
+
+    def test_a_process_that_merely_mentions_it_is_not_it(self):
+        self.assertEqual(
+            self.find(
+                ["vim", "ao3downloader.py"],
+                ["grep", "-r", "ao3downloader", "."],
+                ["python3", "download_fics.py", "--links", "/home/example/ao3downloader/links"],
+            ),
+            (),
+        )
+
+
 class CalibreScriptRunnerTest(unittest.TestCase):
     def test_a_lot_of_stderr_cannot_hang_the_runner(self):
         """stderr used to be a pipe read only after stdout ended; a full pipe deadlocked both."""

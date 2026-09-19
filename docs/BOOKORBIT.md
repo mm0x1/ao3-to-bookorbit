@@ -2,8 +2,9 @@
 
 Optional. [BookOrbit](https://github.com/bookorbit/bookorbit) is a self-hosted
 library server; this page is for anyone who reads there rather than in Calibre.
-`send_to_server.py` needs it; nothing else in this project does, and without
-`BOOKORBIT_URL` the sync says so and exits cleanly.
+`send_to_server.py` needs it, and `download_fics.py` uses it to know which works
+are already on the server. Without `BOOKORBIT_URL` the download treats every
+work as new, and the sync says so and exits cleanly.
 
 1. [What the file carries and what it cannot](#what-the-file-carries-and-what-it-cannot)
 2. [One-time setup: the custom fields](#one-time-setup-the-custom-fields)

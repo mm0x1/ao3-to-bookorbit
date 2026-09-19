@@ -198,6 +198,33 @@ def read_front_page_rating(epub_path: str | Path) -> str | None:
     return None
 
 
+CHAPTERS_PATTERN = re.compile(r"^\s*([\d,]+)\s*/\s*([\d,]+|\?)\s*$")
+
+
+def chapter_progress(text: str | None) -> tuple[int, int | None] | None:
+    """AO3's chapter count ("3/?", "3/10") as (written, planned), planned None when AO3 says "?".
+
+    None when there is no count, or it is not in that shape.
+    """
+
+    match = CHAPTERS_PATTERN.match(text) if text else None
+    if match is None:
+        return None
+    written = int(match.group(1).replace(",", ""))
+    planned = None if match.group(2) == "?" else int(match.group(2).replace(",", ""))
+    return written, planned
+
+
+def is_in_progress(text: str | None) -> bool | None:
+    """Whether a work is unfinished by its chapter count; None when the count cannot be read."""
+
+    progress = chapter_progress(text)
+    if progress is None:
+        return None
+    written, planned = progress
+    return planned is None or written < planned
+
+
 def extract_work_id(url: str) -> str:
     """Return the numeric AO3 work id from a work URL."""
 

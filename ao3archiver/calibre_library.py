@@ -256,11 +256,8 @@ def _program_names(argv: Sequence[str]) -> list[str]:
     return names
 
 
-def _is_calibre_program(argv: Sequence[str]) -> bool:
-    return any(
-        name in CALIBRE_PROCESS_NAMES or "calibre-web" in name or "calibreweb" in name
-        for name in _program_names(argv)
-    )
+def _is_calibre_name(name: str) -> bool:
+    return name in CALIBRE_PROCESS_NAMES or "calibre-web" in name or "calibreweb" in name
 
 
 def _proc_command_lines(proc_root: Path = Path("/proc")) -> list[tuple[int, list[str]]]:
@@ -278,15 +275,28 @@ def _proc_command_lines(proc_root: Path = Path("/proc")) -> list[tuple[int, list
     return processes
 
 
-def running_calibre_processes(
+def running_programs(
+    is_program: Callable[[str], bool],
     command_lines: Callable[[], list[tuple[int, list[str]]]] = _proc_command_lines,
 ) -> tuple[str, ...]:
+    """Every other process running a program ``is_program`` recognises, as "pid command line".
+
+    Only the program's own name counts (see :func:`_program_names`), so an
+    editor or a grep that merely mentions it is not mistaken for it.
+    """
+
     own_pid = os.getpid()
     return tuple(
         f"{pid} {' '.join(argv)}"
         for pid, argv in command_lines()
-        if pid != own_pid and _is_calibre_program(argv)
+        if pid != own_pid and any(is_program(name) for name in _program_names(argv))
     )
+
+
+def running_calibre_processes(
+    command_lines: Callable[[], list[tuple[int, list[str]]]] = _proc_command_lines,
+) -> tuple[str, ...]:
+    return running_programs(_is_calibre_name, command_lines)
 
 
 def require_calibre_closed() -> None:

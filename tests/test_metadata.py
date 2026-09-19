@@ -14,10 +14,12 @@ from ao3archiver.metadata import (
     _calibre_user_metadata,
     AO3Metadata,
     canonical_rating,
+    chapter_progress,
     enrich_epub,
     enrich_epub_portable,
     epub_rating_subjects,
     has_ao3_metadata,
+    is_in_progress,
     metadata_from_csv_row,
     opf_prefixed_element_names,
     parse_ao3_metadata,
@@ -640,6 +642,28 @@ class RatingTest(unittest.TestCase):
 
             self.assertEqual(epub_rating_subjects(epub_path), ("Not Rated",))
             self.assertEqual(opf_prefixed_element_names(read_epub_package(epub_path)[1]), ())
+
+
+
+class ChapterProgressTest(unittest.TestCase):
+    def test_ao3s_chapter_counts_are_read(self):
+        self.assertEqual(chapter_progress("3/?"), (3, None))
+        self.assertEqual(chapter_progress("3/10"), (3, 10))
+        self.assertEqual(chapter_progress("12/12"), (12, 12))
+        self.assertEqual(chapter_progress("1/1"), (1, 1))
+        self.assertEqual(chapter_progress("1,024/?"), (1024, None))
+
+    def test_anything_else_is_no_count_at_all(self):
+        for text in ("", None, "junk", "3", "3/", "?/10", "3/10 chapters"):
+            self.assertIsNone(chapter_progress(text), text)
+
+    def test_a_work_is_unfinished_until_its_last_planned_chapter(self):
+        self.assertTrue(is_in_progress("3/?"))
+        self.assertTrue(is_in_progress("3/10"))
+        self.assertFalse(is_in_progress("12/12"))
+        self.assertFalse(is_in_progress("1/1"))
+        self.assertIsNone(is_in_progress(None))
+        self.assertIsNone(is_in_progress("junk"))
 
 
 if __name__ == "__main__":

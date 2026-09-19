@@ -169,14 +169,14 @@ class MenuTest(unittest.TestCase):
     def test_a_chosen_flow_prints_the_exact_command_before_offering_to_run_it(self):
         self.main(choices=(1,), confirmations=(False,))
 
-        self.assertIn("$ python3 download.py --dry-run", self.text())
-        self.assertIn("$ python3 download.py", self.text())
+        self.assertIn("$ python3 download_fics.py --dry-run", self.text())
+        self.assertIn("$ python3 download_fics.py", self.text())
         self.assertEqual(self.ran, [], "a declined offer runs nothing")
 
     def test_accepting_runs_exactly_the_command_that_was_printed(self):
         self.main(choices=(1,), confirmations=(True,))
 
-        self.assertEqual(self.ran, [["python3", "download.py", "--dry-run"]])
+        self.assertEqual(self.ran, [["python3", "download_fics.py", "--dry-run"]])
 
     def test_a_flow_with_nothing_to_run_just_explains_itself(self):
         self.main(choices=(0,))

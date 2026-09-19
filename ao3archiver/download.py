@@ -7,6 +7,10 @@ Words/Gfog metrics from the file, and writes everything into the EPUB: an
 and Calibre ``calibre:user_metadata`` values. Dragging the files into Calibre
 then fills the custom columns with no separate sync step.
 
+Before anything is requested, the plan asks BookOrbit what is already on the
+server, by AO3 work ID: a work already there is downloaded again only when it
+is unfinished and AO3 has more chapters, or when asked to.
+
 Runs are unattended by default: a failing work is recorded and skipped, an
 AO3-wide problem pauses the run instead of ending it, and rerunning the same
 command resumes from what is already on disk.
@@ -43,16 +47,25 @@ from ao3archiver.ao3_client import (
     run_work_queue,
     WorkOutcome,
 )
-from ao3archiver.calibre_library import ALL_COLUMNS
+from ao3archiver.bookorbit import (
+    BookOrbitClient,
+    BookOrbitError,
+    load_bookorbit_config,
+    OwnedLibrary,
+    owned_works,
+)
+from ao3archiver.calibre_library import ALL_COLUMNS, running_programs
 from ao3archiver.common import ArchiverError, REPO_ROOT, STATE_DIR
 from ao3archiver.credentials import AO3Credentials, load_run_credentials
 from ao3archiver.metadata import (
     AO3Metadata,
     canonical_work_url,
+    chapter_progress,
     enrich_epub,
     epub_rating_subjects,
     has_ao3_metadata,
     has_calibre_user_metadata,
+    is_in_progress,
     parse_ao3_metadata,
     read_ao3_metadata,
     read_front_page_rating,
@@ -83,10 +96,15 @@ WORK_ID_PATTERN = re.compile(r"/works/(\d+)")
 LOGGER = logging.getLogger("ao3.download")
 
 EPUB_ERRORS = (ValueError, OSError, zipfile.BadZipFile, ET.ParseError)
-Action = Literal["download", "enrich"]
+Action = Literal["download", "enrich", "update"]
 # Paced requests per work: the work page (its chapter redirect is immediate)
-# plus, for a new download, the EPUB itself.
-REQUESTS_PER_ACTION: dict[Action, int] = {"download": 2, "enrich": 1}
+# plus, for a new download, the EPUB itself. An update is the page alone, plus
+# the EPUB only when AO3 has more chapters.
+REQUESTS_PER_ACTION: dict[Action, int] = {"download": 2, "enrich": 1, "update": 1}
+OUTCOME_LABELS: dict[Action, str] = {"download": "downloaded", "enrich": "enriched", "update": "updated"}
+# The link harvester signs in to the same AO3 account, and the account lock
+# cannot see it.
+HARVESTER_NAMES = frozenset({"ao3downloader.py", "ao3downloader"})
 
 
 # --- links ---------------------------------------------------------------------
@@ -226,6 +244,8 @@ class PlannedWork:
     target: WorkTarget
     epub_path: Path
     action: Action
+    # For an update: the chapter count of the copy on the server ("3/?").
+    owned_chapters: str | None = None
 
 
 @dataclass(frozen=True)
@@ -293,11 +313,72 @@ def plan_work(
     return tuple(planned), PlanCounts(complete, unavailable, missing_file)
 
 
+@dataclass(frozen=True)
+class OwnedSplit:
+    """A plan's downloads, sorted by what the server already holds (see :func:`split_owned`)."""
+
+    # Everything the server does not hold, and every enrich of a local file.
+    kept: tuple[PlannedWork, ...] = ()
+    # Held, and unfinished on the server's copy: planned as updates.
+    in_progress: tuple[PlannedWork, ...] = ()
+    # Held and finished, or held with no chapter count: re-downloaded only on request.
+    complete: tuple[PlannedWork, ...] = ()
+    unknown: tuple[PlannedWork, ...] = ()
+
+
+def split_owned(planned: Sequence[PlannedWork], owned: OwnedLibrary | None) -> OwnedSplit:
+    """Sort the downloads by what the server holds, after the ``downloaded/`` check.
+
+    A file already in ``downloaded/`` is waiting to be sent, so it was settled
+    by :func:`plan_work` and is not looked up again. Without an owned list,
+    every download is new.
+    """
+
+    if owned is None:
+        return OwnedSplit(kept=tuple(planned))
+    kept: list[PlannedWork] = []
+    in_progress: list[PlannedWork] = []
+    complete: list[PlannedWork] = []
+    unknown: list[PlannedWork] = []
+    for item in planned:
+        work = owned.works.get(item.target.work_id) if item.action == "download" else None
+        if work is None:
+            kept.append(item)
+            continue
+        unfinished = is_in_progress(work.chapters)
+        if unfinished is None:
+            unknown.append(item)
+        elif unfinished:
+            in_progress.append(replace(item, action="update", owned_chapters=work.chapters))
+        else:
+            complete.append(item)
+    return OwnedSplit(tuple(kept), tuple(in_progress), tuple(complete), tuple(unknown))
+
+
+def has_new_chapters(owned: str | None, current: str | None) -> bool:
+    """Whether AO3's chapter count has grown past the server's copy.
+
+    A count that cannot be read counts as grown: a download costs one request,
+    a missed chapter costs the chapter.
+    """
+
+    before, after = chapter_progress(owned), chapter_progress(current)
+    if before is None or after is None:
+        return True
+    return after[0] > before[0]
+
+
 def estimate_seconds(planned: Sequence[PlannedWork], delay_seconds: float) -> float:
     return sum(REQUESTS_PER_ACTION[item.action] for item in planned) * delay_seconds
 
 
 # --- EPUB handling -------------------------------------------------------------
+
+
+def _current_umask() -> int:
+    mask = os.umask(0)
+    os.umask(mask)
+    return mask
 
 
 def save_epub_atomically(content: bytes, destination: Path) -> None:
@@ -316,6 +397,9 @@ def save_epub_atomically(content: bytes, destination: Path) -> None:
             temporary_path = Path(temporary.name)
             temporary.write(content)
         validate_epub_file(temporary_path)
+        # A temporary file is created 0600; a book is for others to read too,
+        # such as a library server's container once it is sent.
+        os.chmod(temporary_path, 0o644 & ~_current_umask())
         os.replace(temporary_path, destination)
         temporary_path = None
     finally:
@@ -424,7 +508,9 @@ class WorkProcessor:
             return WorkOutcome("unavailable", reason)
 
         metadata = metadata_from_page(page, work_id)
-        if item.action == "download":
+        if item.action == "update" and not has_new_chapters(item.owned_chapters, metadata.chapters):
+            return WorkOutcome("unchanged", f"still {metadata.chapters} chapters on AO3")
+        if item.action in ("download", "update"):
             self.stage = "download"
             url = find_epub_download_url(page.html or "", work_id)
             save_epub_atomically(self.client.download_epub(url, work_id), item.epub_path)
@@ -436,10 +522,13 @@ class WorkProcessor:
         if not epub_rating_subjects(item.epub_path):
             self.without_rating.append(work_id)
 
-        label = "downloaded" if item.action == "download" else "enriched"
+        label = OUTCOME_LABELS[item.action]
+        detail = describe(metadata)
+        if item.action == "update":
+            detail = f"chapters {item.owned_chapters} -> {metadata.chapters}; {detail}"
         if page.record.availability == "incomplete":
-            return WorkOutcome(label, f"no AO3 statistics on the page; {describe(metadata)}")
-        return WorkOutcome(label, describe(metadata))
+            return WorkOutcome(label, f"no AO3 statistics on the page; {detail}")
+        return WorkOutcome(label, detail)
 
     def record_failure(self, work_id: str, error: Exception) -> None:
         self.failure_log.record(
@@ -465,6 +554,43 @@ def _default_client(
     return AO3DownloadClient(credentials, delay_seconds=delay_seconds, sleep_fn=sleep_fn)
 
 
+OwnedLoader = Callable[[], OwnedLibrary | None]
+
+
+def load_owned_works() -> OwnedLibrary | None:
+    """What BookOrbit holds, or None when BookOrbit is not configured.
+
+    A BookOrbit that is configured but cannot be read stops the run: a plan
+    made without it would download works that are already on the server.
+    """
+
+    config = load_bookorbit_config()
+    if config is None:
+        return None
+    try:
+        return owned_works(BookOrbitClient(config), config.library_id)
+    except BookOrbitError as error:
+        raise BookOrbitError(
+            f"Could not read what BookOrbit holds, so nothing was requested from AO3. {error}"
+        ) from error
+
+
+def running_harvesters() -> tuple[str, ...]:
+    return running_programs(lambda name: name in HARVESTER_NAMES)
+
+
+def _owned_rows(split: OwnedSplit, owned: OwnedLibrary | None) -> list[tuple[str, object]]:
+    if owned is None:
+        return [("on the server", "unknown: BookOrbit is not configured, so every work is new")]
+    new = sum(1 for item in split.kept if item.action == "download")
+    return [
+        ("not on the server", new),
+        ("on the server, unfinished", len(split.in_progress)),
+        ("on the server, complete", len(split.complete)),
+        ("on the server, no chapter count", len(split.unknown)),
+    ]
+
+
 @dataclass(frozen=True)
 class RunSummary:
     planned: int
@@ -484,6 +610,9 @@ def run_downloads(
     limit: int | None = None,
     dry_run: bool = False,
     confirm_start: Callable[[], bool] | None = None,
+    ask: Callable[[str, bool], bool] | None = None,
+    owned_loader: OwnedLoader | None = None,
+    harvesters: Callable[[], Sequence[str]] = running_harvesters,
     sleep_fn: Callable[[float], None] = time.sleep,
     failure_log_path: Path = DEFAULT_FAILURE_LOG,
     lock_path: Path = ACCOUNT_LOCK_PATH,
@@ -492,9 +621,12 @@ def run_downloads(
 ) -> RunSummary:
     """Plan the run, then download and enrich every planned work unattended.
 
-    ``confirm_start`` is asked once, after the plan is printed and before the
-    first request, and only where there is someone to ask; see
-    :mod:`ao3archiver.prompts`.
+    ``owned_loader`` says what the server already holds; without one, every
+    work not in ``output_dir`` is new. ``ask(question, default)`` puts the
+    opening questions about owned works, and ``confirm_start`` is asked once
+    after them. All come after the plan is printed and before the first
+    request, and only where there is someone to ask; see
+    :mod:`ao3archiver.prompts`. A dry run, or no ``ask``, takes the defaults.
     """
 
     LOGGER.info(f"reading link files from {links_dir}")
@@ -506,24 +638,27 @@ def run_downloads(
     failure_log = FailureLog(failure_log_path)
     unavailable = frozenset() if retry_unavailable else failure_log.permanently_unavailable()
     LOGGER.info(f"checking existing files in {output_dir}")
-    planned, counts = plan_work(
+    candidates, counts = plan_work(
         inventory,
         output_dir,
         skip_work_ids=unavailable,
         refresh=refresh,
         metadata_only=metadata_only,
-        limit=limit,
     )
+    owned = None
+    if owned_loader is not None and any(item.action == "download" for item in candidates):
+        # Before any AO3 request: a BookOrbit that cannot be read stops the run here.
+        LOGGER.info("asking BookOrbit what is already on the server")
+        owned = owned_loader()
+    split = split_owned(candidates, owned)
 
-    actions = Counter(item.action for item in planned)
-    seconds = estimate_seconds(planned, delay_seconds)
     entries: list[tuple[str, object]] = [
         ("link files", inventory.files),
         ("link lines", inventory.lines),
         ("unique works", len(inventory.targets)),
         ("duplicate lines", inventory.duplicates),
         ("unparseable lines", len(inventory.invalid)),
-        ("already complete", counts.complete),
+        ("already in downloaded/", counts.complete),
         (
             "unavailable on AO3",
             f"{counts.unavailable} (skipped; --retry-unavailable to include)" if counts.unavailable else "0",
@@ -531,8 +666,46 @@ def run_downloads(
     ]
     if metadata_only:
         entries.append(("not downloaded yet", counts.missing_file))
-    entries += [
+    if any(item.action == "download" for item in candidates):
+        entries += _owned_rows(split, owned)
+    log_banner(LOGGER, "AO3 download" + (" (dry run)" if dry_run else ""), entries)
+    for url in inventory.invalid[:5]:
+        LOGGER.warning(f"ignoring unparseable link: {url}")
+    for process in harvesters():
+        LOGGER.warning(
+            f"ao3downloader is running ({process}); it signs in to the same AO3 account, which this run's "
+            "lock cannot see. Let it finish before downloading."
+        )
+
+    def answer(question: str, default: bool) -> bool:
+        if ask is None or dry_run:
+            LOGGER.info(f"{question} {'yes' if default else 'no'} (the default)")
+            return default
+        return ask(question, default)
+
+    chosen = {item.target.work_id: item for item in split.kept}
+    if split.in_progress and answer(
+        f"{len(split.in_progress)} of these works are unfinished on the server. "
+        "Check AO3 for new chapters (one request each)?",
+        True,
+    ):
+        chosen.update((item.target.work_id, item) for item in split.in_progress)
+    finished = (*split.complete, *split.unknown)
+    if finished and answer(
+        f"{len(finished)} of these works are on the server and finished, or have no chapter count. "
+        "Download them again anyway?",
+        False,
+    ):
+        chosen.update((item.target.work_id, item) for item in finished)
+    planned = [chosen[target.work_id] for target in inventory.targets if target.work_id in chosen]
+    if limit is not None:
+        planned = planned[:limit]
+
+    actions = Counter(item.action for item in planned)
+    seconds = estimate_seconds(planned, delay_seconds)
+    log_banner(LOGGER, "Plan" + (" (dry run)" if dry_run else ""), [
         ("to download", actions["download"]),
+        ("to check for new chapters", actions["update"]),
         ("to enrich only", actions["enrich"]),
         ("output folder", output_dir),
         ("delay", f"{delay_seconds:g}s between requests"),
@@ -542,13 +715,10 @@ def run_downloads(
             f"(about {format_clock(datetime.now().astimezone() + timedelta(seconds=seconds))})",
         ),
         ("failure log", failure_log_path),
-    ]
-    log_banner(LOGGER, "AO3 download" + (" (dry run)" if dry_run else ""), entries)
-    for url in inventory.invalid[:5]:
-        LOGGER.warning(f"ignoring unparseable link: {url}")
+    ])
 
     if not planned:
-        LOGGER.info("nothing to do: every link is already downloaded and enriched")
+        LOGGER.info("nothing to do: every work is already downloaded, or already on the server")
         return RunSummary(planned=0, outcomes={}, still_failed={})
 
     if dry_run:
@@ -667,7 +837,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--yes",
         action="store_true",
-        help="answer yes to the confirmation this command asks at a terminal",
+        help="ask nothing: start at once, and take the default for every other question",
     )
     return parser
 
@@ -684,9 +854,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     run.logger.info(f"ao3 download · log file: {run.log_path}")
 
     def confirm_start() -> bool:
-        # A bare `download.py` signs in and starts fetching, so at a terminal it
-        # asks once - after the plan above, before the first request.
+        # A bare `download_fics.py` signs in and starts fetching, so at a
+        # terminal it asks once - after the plan above, before the first request.
         return prompts.confirm("Start this download now?", default=True, assume_yes=args.yes)
+
+    def ask(question: str, default: bool) -> bool:
+        # --yes must never mean "download everything you own again".
+        if args.yes:
+            LOGGER.info(f"{question} {'yes' if default else 'no'} (--yes takes the default)")
+            return default
+        return prompts.confirm(question, default=default)
 
     with interrupt_guard(run.logger, unit="work") as guard:
         run_downloads(
@@ -699,6 +876,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             limit=args.limit,
             dry_run=args.dry_run,
             confirm_start=None if args.dry_run else confirm_start,
+            ask=ask,
+            owned_loader=load_owned_works,
             sleep_fn=guard.sleep,
             failure_log_path=args.failure_log,
         )
@@ -707,7 +886,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def run() -> None:
-    """Command-line entry point used by ``download.py``."""
+    """Command-line entry point used by ``download_fics.py``."""
 
     try:
         raise SystemExit(main())

@@ -75,14 +75,14 @@ Setup
   [--]  downloaded/      0 EPUB(s)
 ```
 
-`archiver.py` is purely additive: `download.py` and `backfill.py` behave exactly
+`archiver.py` is purely additive: `download_fics.py` and `backfill.py` behave exactly
 as they always have, so nothing scripted around them changes.
 
 The three commands most of it comes down to:
 
 ```sh
-python3 download.py --dry-run     # the plan and an estimated finish time
-python3 download.py               # the run itself; resume by running it again
+python3 download_fics.py --dry-run     # the plan and an estimated finish time
+python3 download_fics.py               # the run itself; resume by running it again
 python3 backfill.py --help        # everything for a library you already have
 ```
 
@@ -91,7 +91,7 @@ python3 backfill.py --help        # everything for a library you already have
 | Guide | What it covers |
 | --- | --- |
 | [docs/TUTORIAL.md](docs/TUTORIAL.md) | The whole thing end to end: harvest links, download, import into Calibre, repair, copy to a server, publish |
-| [docs/DOWNLOADING.md](docs/DOWNLOADING.md) | Every `download.py` option, unattended runs, and what happens when a work or AO3 fails |
+| [docs/DOWNLOADING.md](docs/DOWNLOADING.md) | Every `download_fics.py` option, unattended runs, and what happens when a work or AO3 fails |
 | [docs/BACKFILL.md](docs/BACKFILL.md) | Every `backfill.py` subcommand, for a Calibre library that already holds AO3 EPUBs |
 | [docs/BOOKORBIT.md](docs/BOOKORBIT.md) | Publishing the numbers to a BookOrbit library, and the things its own docs do not cover |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Every `.env` key, the SSH alias, and the files kept outside the repository |
@@ -113,7 +113,7 @@ and where its value comes from.
 
 ```text
 archiver.py                 entry point: the setup check and the menu
-download.py                 entry point: download works
+download_fics.py            entry point: download works
 backfill.py                 entry point: one-time library backfill
 ao3archiver/
   ao3_client.py             everything that talks to AO3: login, request policy,

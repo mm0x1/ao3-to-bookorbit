@@ -2,13 +2,16 @@
 
 import io
 import json
+import os
 from pathlib import Path
+import stat
 import tempfile
 import unittest
+from unittest.mock import patch
 import xml.etree.ElementTree as ET
 import zipfile
 
-from ao3archiver import ao3_client, download
+from ao3archiver import ao3_client, bookorbit, download
 from ao3archiver.ao3_client import AO3FetchRecord
 from ao3archiver.metadata import (
     AO3Metadata,
@@ -262,6 +265,22 @@ class SaveEpubTest(unittest.TestCase):
 
             validate_epub_file(destination)
 
+    def test_a_saved_book_is_readable_by_others_as_the_umask_allows(self):
+        """A temporary file is 0600; a book sent to a server must be readable by its container."""
+
+        with tempfile.TemporaryDirectory() as directory:
+            modes = {}
+            for mask in (0o022, 0o077):
+                previous = os.umask(mask)
+                try:
+                    destination = Path(directory) / f"{mask:o}.epub"
+                    download.save_epub_atomically(epub_bytes(), destination)
+                finally:
+                    os.umask(previous)
+                modes[mask] = stat.S_IMODE(destination.stat().st_mode)
+
+        self.assertEqual(modes, {0o022: 0o644, 0o077: 0o600})
+
 
 class EnrichForCalibreTest(unittest.TestCase):
     def test_every_column_including_local_words_and_gfog_is_baked_in(self):
@@ -294,7 +313,9 @@ class EnrichForCalibreTest(unittest.TestCase):
         self.assertEqual(stored.published, "2018-06-01")
 
 
-class RunDownloadsTest(unittest.TestCase):
+class DownloadHarness:
+    """A links folder, an output folder and a fake AO3, for whole offline runs."""
+
     def setUp(self):
         self._directory = tempfile.TemporaryDirectory()
         self.root = Path(self._directory.name)
@@ -319,6 +340,7 @@ class RunDownloadsTest(unittest.TestCase):
                 credentials, delay_seconds=delay, sleep_fn=lambda _: None, session=self.session
             )
 
+        options.setdefault("harvesters", lambda: ())
         return download.run_downloads(
             self.links,
             self.output,
@@ -330,6 +352,8 @@ class RunDownloadsTest(unittest.TestCase):
             **options,
         )
 
+
+class RunDownloadsTest(DownloadHarness, unittest.TestCase):
     def test_a_work_is_downloaded_enriched_and_ready_for_calibre(self):
         write_links(self.links, *links_for("111"))
         sign_in_replies(self.session)
@@ -550,6 +574,208 @@ class RunDownloadsTest(unittest.TestCase):
             self.run_downloads()
 
         self.assertFalse(self.failure_log.exists())
+
+
+
+def owned_library(**chapters_by_work):
+    """What BookOrbit would report holding: each work with its AO3 Chapters value."""
+
+    rows = [
+        {"bookId": index, "filePaths": [f"/books/fanfiction/{work_id}.epub"], "custom.ao3_chapters": chapters}
+        for index, (work_id, chapters) in enumerate(chapters_by_work.items(), start=1)
+    ]
+    fields = [bookorbit.CustomField(8, "AO3 Chapters", "text", "ao3_chapters")]
+    return bookorbit.owned_from_rows(rows, fields)
+
+
+EPUB_URL = "https://archiveofourown.org/downloads/{work_id}/Example.epub?updated_at=1700000000&view=full"
+
+
+class SplitOwnedTest(unittest.TestCase):
+    def planned(self, *work_ids, action="download"):
+        return [
+            download.PlannedWork(download.WorkTarget(work_id, f"u{work_id}", "all.txt"), Path(f"{work_id}.epub"), action)
+            for work_id in work_ids
+        ]
+
+    def test_owned_works_are_sorted_by_their_chapter_count(self):
+        split = download.split_owned(
+            self.planned("1", "2", "3", "4", "5"),
+            owned_library(**{"2": "3/?", "3": "3/10", "4": "12/12", "5": None}),
+        )
+
+        self.assertEqual([item.target.work_id for item in split.kept], ["1"])
+        self.assertEqual([(item.target.work_id, item.action, item.owned_chapters) for item in split.in_progress],
+                         [("2", "update", "3/?"), ("3", "update", "3/10")])
+        self.assertEqual([item.target.work_id for item in split.complete], ["4"])
+        self.assertEqual([item.target.work_id for item in split.unknown], ["5"])
+
+    def test_a_file_already_in_downloaded_is_not_looked_up(self):
+        split = download.split_owned(self.planned("2", action="enrich"), owned_library(**{"2": "12/12"}))
+
+        self.assertEqual([item.action for item in split.kept], ["enrich"])
+
+    def test_without_an_owned_list_everything_is_new(self):
+        split = download.split_owned(self.planned("1", "2"), None)
+
+        self.assertEqual(len(split.kept), 2)
+
+    def test_more_chapters_is_new_and_an_unreadable_count_is_treated_as_new(self):
+        self.assertTrue(download.has_new_chapters("3/?", "4/?"))
+        self.assertFalse(download.has_new_chapters("3/?", "3/?"))
+        self.assertFalse(download.has_new_chapters("3/?", "3/10"), "a new total is not a new chapter")
+        self.assertTrue(download.has_new_chapters("3/?", None))
+
+
+class OwnedWorksRunTest(DownloadHarness, unittest.TestCase):
+    """The plan asks BookOrbit what is already on the server, before any AO3 request."""
+
+    def setUp(self):
+        super().setUp()
+        self.questions = []
+        self.stream = io.StringIO()
+        run = configure_logging("unit-download-owned", log_dir=self.root, stream=self.stream, root_name="ao3")
+        self.addCleanup(lambda: [run.logger.removeHandler(h) or h.close() for h in list(run.logger.handlers)])
+
+    def answers(self, **by_default):
+        """Answer the opening questions: ``unfinished`` for the first, ``finished`` for the second."""
+
+        def ask(question, default):
+            self.questions.append(question)
+            return by_default["unfinished" if "unfinished" in question else "finished"]
+
+        return ask
+
+    def serve_page(self, work_id, chapters):
+        serve_work(self.session, work_id, work_page(work_id, chapters=chapters))
+
+    def test_declining_the_chapter_check_asks_ao3_nothing(self):
+        write_links(self.links, *links_for("111"))
+
+        summary = self.run_downloads(
+            owned_loader=lambda: owned_library(**{"111": "3/?"}), ask=self.answers(unfinished=False, finished=False)
+        )
+
+        self.assertEqual(summary.planned, 0)
+        self.assertEqual(self.session.requests, [])
+        self.assertEqual(self.credentials_loaded, 0)
+
+    def test_each_unfinished_work_costs_one_page_and_downloads_only_when_it_grew(self):
+        write_links(self.links, *links_for("111", "222"))
+        sign_in_replies(self.session)
+        self.serve_page("111", "3/?")
+        self.serve_page("222", "5/10")
+        self.session.add(EPUB_URL.format(work_id="222"), epub_reply())
+
+        summary = self.run_downloads(
+            owned_loader=lambda: owned_library(**{"111": "3/?", "222": "3/10"}),
+            ask=self.answers(unfinished=True, finished=False),
+        )
+
+        self.assertEqual(summary.outcomes, {"unchanged": 1, "updated": 1})
+        self.assertFalse((self.output / "111.epub").exists(), "no new chapters, no file")
+        self.assertTrue(download.is_complete(self.output / "222.epub"))
+        self.assertEqual(
+            [request for request in self.session.requests if "/downloads/" in request],
+            ["GET " + EPUB_URL.format(work_id="222")],
+        )
+        self.assertRegex(self.stream.getvalue(), r"to check for new chapters\s+2\n")
+
+    def test_finished_works_are_downloaded_again_only_on_a_yes(self):
+        write_links(self.links, *links_for("333", "444"))
+        owned = owned_library(**{"333": "12/12", "444": None})
+
+        declined = self.run_downloads(owned_loader=lambda: owned, ask=self.answers(unfinished=True, finished=False))
+
+        self.assertEqual(declined.planned, 0)
+        self.assertEqual(self.session.requests, [])
+        self.assertIn("2 of these works are on the server and finished, or have no chapter count", self.questions[0])
+
+        sign_in_replies(self.session)
+        for work_id in ("333", "444"):
+            serve_work(self.session, work_id)
+            self.session.add(EPUB_URL.format(work_id=work_id), epub_reply())
+
+        accepted = self.run_downloads(owned_loader=lambda: owned, ask=self.answers(unfinished=True, finished=True))
+
+        self.assertEqual(accepted.outcomes, {"downloaded": 2})
+
+    def test_a_question_with_nothing_behind_it_is_never_asked(self):
+        write_links(self.links, *links_for("111"))
+
+        self.run_downloads(owned_loader=lambda: owned_library(), ask=self.answers(), dry_run=True)
+        self.run_downloads(owned_loader=lambda: owned_library(), ask=self.answers(), confirm_start=lambda: False)
+
+        self.assertEqual(self.questions, [])
+
+    def test_a_dry_run_takes_the_defaults_without_asking(self):
+        write_links(self.links, *links_for("111", "333"))
+
+        summary = self.run_downloads(
+            owned_loader=lambda: owned_library(**{"111": "3/?", "333": "12/12"}),
+            ask=lambda question, default: self.fail(f"asked in a dry run: {question}"),
+            dry_run=True,
+        )
+
+        self.assertEqual(summary.planned, 1, "the unfinished work is checked; the finished one is not")
+        self.assertIn("would update: work=111", self.stream.getvalue())
+
+    def test_without_bookorbit_the_plan_says_every_work_is_new(self):
+        write_links(self.links, *links_for("111"))
+
+        summary = self.run_downloads(owned_loader=lambda: None, dry_run=True)
+
+        self.assertEqual(summary.planned, 1)
+        self.assertIn("BookOrbit is not configured, so every work is new", self.stream.getvalue())
+
+    def test_an_unreachable_bookorbit_stops_before_any_ao3_request(self):
+        write_links(self.links, *links_for("111"))
+
+        def unreachable():
+            raise bookorbit.BookOrbitError("Could not reach BookOrbit at http://books.example/api/v1")
+
+        with self.assertRaises(bookorbit.BookOrbitError):
+            self.run_downloads(owned_loader=unreachable)
+
+        self.assertEqual(self.session.requests, [])
+        self.assertEqual(self.credentials_loaded, 0)
+
+    def test_a_file_waiting_in_downloaded_needs_no_lookup_at_all(self):
+        write_links(self.links, *links_for("111"))
+        self.output.mkdir()
+        epub = self.output / "111.epub"
+        epub.write_bytes(epub_bytes())
+        download.enrich_for_calibre(epub, AO3Metadata("111", "https://archiveofourown.org/works/111", kudos=5))
+
+        self.run_downloads(owned_loader=lambda: self.fail("BookOrbit was asked"), dry_run=True)
+
+    def test_a_running_harvester_is_warned_about(self):
+        write_links(self.links, *links_for("111"))
+
+        self.run_downloads(dry_run=True, harvesters=lambda: ("4242 python3 ao3downloader.py",))
+
+        self.assertIn("ao3downloader is running (4242 python3 ao3downloader.py)", self.stream.getvalue())
+
+
+class MainTest(unittest.TestCase):
+    def test_yes_never_means_download_everything_again(self):
+        captured = {}
+
+        def fake_run_downloads(*args, **options):
+            captured.update(options)
+            return download.RunSummary(planned=0, outcomes={}, still_failed={})
+
+        with tempfile.TemporaryDirectory() as directory, patch.object(download, "run_downloads", fake_run_downloads):
+            download.main(["--yes", "--log-dir", directory])
+            for handler in list(download.LOGGER.parent.handlers):
+                download.LOGGER.parent.removeHandler(handler)
+                handler.close()
+
+        ask = captured["ask"]
+        self.assertFalse(ask("Download them again anyway?", False))
+        self.assertTrue(ask("Check AO3 for new chapters?", True))
+        self.assertTrue(captured["confirm_start"]())
+        self.assertIs(captured["owned_loader"], download.load_owned_works)
 
 
 if __name__ == "__main__":
