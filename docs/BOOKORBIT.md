@@ -111,13 +111,14 @@ The everyday way is `send_to_server.py` ([docs/SERVER.md](SERVER.md#sending)):
 it sends the files, waits for BookOrbit to pick up the new ones, and fills in
 their fields, all in one run. Nothing else is needed.
 
-`bookorbit-sync` does the same for a whole folder of EPUBs that are already on
-the server — a Calibre library, say. Scan the library in BookOrbit first, so every
-book exists and has an id, then:
+`bookorbit-sync`, a command of the [retired backfill](BACKFILL.md), does the
+same for a whole folder of EPUBs that are already on the server — a Calibre
+library, say. Scan the library in BookOrbit first, so every book exists and has
+an id, then:
 
 ```sh
-python3 backfill.py bookorbit-sync --library downloaded --dry-run
-python3 backfill.py bookorbit-sync --library downloaded
+python3 retired/calibre_backfill.py bookorbit-sync --library downloaded --dry-run
+python3 retired/calibre_backfill.py bookorbit-sync --library downloaded
 ```
 
 Point `--library` at whichever folder holds the EPUBs you sent, `downloaded/` or

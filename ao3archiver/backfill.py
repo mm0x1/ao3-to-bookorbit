@@ -1701,7 +1701,7 @@ def enrich_existing_epubs(
         book_id, label, cached, current = stale[0]
         raise BackfillError(
             f"{len(stale)} cached AO3 values are not in Calibre yet (first: book {book_id} "
-            f"#{label} cached {cached!r}, Calibre has {current!r}). Run `backfill.py write` "
+            f"#{label} cached {cached!r}, Calibre has {current!r}). Run `retired/calibre_backfill.py write` "
             "first so the EPUBs and the library agree. Nothing has been changed."
         )
 
@@ -2805,7 +2805,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def run() -> None:
-    """Command-line entry point used by ``backfill.py``."""
+    """Command-line entry point used by ``retired/calibre_backfill.py``."""
 
     try:
         raise SystemExit(main())

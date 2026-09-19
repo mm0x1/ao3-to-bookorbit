@@ -2,16 +2,16 @@
 
 Deliberately a teacher rather than a wrapper. Every flow prints the exact
 command it would run before offering to run it, because the commands are what
-the guides in ``docs/`` document and what an unattended run needs. Nothing here
-is required: ``download_fics.py`` and ``backfill.py`` behave exactly as they always
-have, with or without this screen.
+the guides in ``docs/`` document and what an unattended run needs. Each of the
+three scripts it offers shows its own plan and asks before it changes
+anything, so running one from here is as safe as running it by hand. Nothing
+here is required: the scripts behave the same with or without this screen.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-import os
 from pathlib import Path
 import subprocess
 
@@ -22,28 +22,23 @@ from ao3archiver.credentials import (
     CredentialError,
     DEFAULT_DOTENV_PATH,
     DEFAULT_INI_PATH,
-    load_dotenv_values,
     resolve_credentials,
 )
 from ao3archiver.download import DEFAULT_LINKS_DIR, DEFAULT_OUTPUT_DIR, load_link_inventory
-
-# Where the Calibre library is, so the commands printed here are ready to run.
-# Optional: without it they carry a placeholder path instead.
-CALIBRE_LIBRARY_KEY = "CALIBRE_LIBRARY"
-LIBRARY_PLACEHOLDER = "/path/to/Calibre Library"
-EPUB_BACKUP_DIR = "~/.local/share/ao3-calibre-backfill/epub-originals-repair"
+from ao3archiver.server import ALL_KEYS, load_server_settings, missing_settings, ServerError
 
 SUMMARY = (
-    "Downloads Archive of Our Own works as EPUBs with their AO3 statistics baked in:",
-    "kudos, hits, words, a local word count and a readability score, ready to sort on.",
+    "Downloads Archive of Our Own works as EPUBs with their AO3 statistics baked in,",
+    "sends them to your library server, and backs that server up.",
 )
 
 DOCS = (
-    ("docs/TUTORIAL.md", "the whole run, end to end"),
-    ("docs/DOWNLOADING.md", "every download_fics.py option, and unattended runs"),
-    ("docs/BACKFILL.md", "every backfill.py subcommand"),
-    ("docs/BOOKORBIT.md", "publishing to a BookOrbit library"),
+    ("docs/TUTORIAL.md", "the whole pipeline, end to end"),
+    ("docs/DOWNLOADING.md", "download_fics.py: the plan, owned works, unattended runs"),
+    ("docs/SERVER.md", "send_to_server.py and backup_server.py"),
+    ("docs/BOOKORBIT.md", "BookOrbit's custom fields and folder watch"),
     ("docs/CONFIGURATION.md", ".env keys, paths, and the SSH alias"),
+    ("docs/BACKFILL.md", "the retired Calibre backfill"),
 )
 
 MARKS = {True: "ok", False: "--", None: "  "}
@@ -65,24 +60,26 @@ class Flow:
     title: str
     explanation: tuple[str, ...]
     commands: tuple[str, ...] = ()
-    # A read-only first step (a dry run) is the only thing offered to run from
-    # here; anything that writes is printed for the person to run themselves.
-    preview: str | None = None
+    # The script offered to run from here. Each one prints its plan and asks
+    # before it changes anything, so offering it is safe.
+    offer: str | None = None
 
 
-def library_path(
+def server_check(
     environ: Mapping[str, str] | None = None,
     *,
-    dotenv_path: Path | None = DEFAULT_DOTENV_PATH,
-) -> Path | None:
-    """The Calibre library named in ``CALIBRE_LIBRARY``, if there is one."""
+    dotenv_path: Path = DEFAULT_DOTENV_PATH,
+) -> Check:
+    """Whether the server settings are all there and well formed; offline, like every check here."""
 
-    values = dict(load_dotenv_values(dotenv_path, keys=(CALIBRE_LIBRARY_KEY,)) if dotenv_path is not None else {})
-    process = os.environ if environ is None else environ
-    if CALIBRE_LIBRARY_KEY in process:
-        values[CALIBRE_LIBRARY_KEY] = process[CALIBRE_LIBRARY_KEY]
-    raw = (values.get(CALIBRE_LIBRARY_KEY) or "").strip()
-    return Path(raw).expanduser() if raw else None
+    missing = missing_settings(ALL_KEYS, environ, dotenv_path=dotenv_path)
+    if missing:
+        return Check("Server settings", False, f"not set: {', '.join(missing)}")
+    try:
+        settings = load_server_settings(ALL_KEYS, environ, dotenv_path=dotenv_path)
+    except ServerError as error:
+        return Check("Server settings", False, str(error).splitlines()[0])
+    return Check("Server settings", True, f"{settings.server}:{settings.library_dir}")
 
 
 def setup_checks(
@@ -92,7 +89,6 @@ def setup_checks(
     environ: Mapping[str, str] | None = None,
     links_dir: Path = DEFAULT_LINKS_DIR,
     output_dir: Path = DEFAULT_OUTPUT_DIR,
-    library: Path | None = None,
 ) -> tuple[Check, ...]:
     """Answer, one line each, every question someone asks before their first run."""
 
@@ -104,22 +100,17 @@ def setup_checks(
     except (CredentialError, OSError) as error:
         checks.append(Check("AO3 credentials", False, str(error).split(".")[0]))
 
-    if library is None:
-        checks.append(Check("Calibre library", None, f"{CALIBRE_LIBRARY_KEY} is not set (only the backfill needs it)"))
-    elif (library / "metadata.db").is_file():
-        checks.append(Check("Calibre library", True, str(library)))
-    else:
-        checks.append(Check("Calibre library", False, f"no metadata.db in {library}"))
-
     try:
         config = load_bookorbit_config(environ, dotenv_path=dotenv_path)
         checks.append(
-            Check("BookOrbit", None, "not configured (optional)")
+            Check("BookOrbit", None, "not configured (send_to_server.py needs it)")
             if config is None
             else Check("BookOrbit", True, config.base_url)
         )
     except (BookOrbitError, OSError) as error:
         checks.append(Check("BookOrbit", False, str(error)))
+
+    checks.append(server_check(environ, dotenv_path=dotenv_path))
 
     if links_dir.is_dir():
         inventory = load_link_inventory(links_dir)
@@ -140,10 +131,9 @@ def setup_checks(
     return tuple(checks)
 
 
-def flows(library: Path | None = None) -> tuple[Flow, ...]:
+def flows() -> tuple[Flow, ...]:
     """The things this project does, in the order someone does them."""
 
-    shown = f'"{library}"' if library is not None else f'"{LIBRARY_PLACEHOLDER}"'
     return (
         Flow(
             "Harvest links from AO3",
@@ -156,58 +146,34 @@ def flows(library: Path | None = None) -> tuple[Flow, ...]:
         Flow(
             "Download the works",
             (
-                "Reads each link, fetches the work page and its EPUB, calculates the local",
-                "word count and readability score, and writes it all into the file.",
-                "The dry run shows the plan and an estimated finish time, and asks for nothing.",
+                "Reads each link and asks BookOrbit which works are already on the server.",
+                "New works are downloaded; for unfinished ones it offers to check AO3 for new",
+                "chapters. Each EPUB gets its AO3 statistics, a local word count and a",
+                "readability score written into it. It shows the plan and asks before starting;",
+                "under nohup it takes the defaults, for runs that last days.",
             ),
-            commands=("python3 download_fics.py --dry-run", "python3 download_fics.py"),
-            preview="python3 download_fics.py --dry-run",
+            commands=("python3 download_fics.py", "nohup python3 download_fics.py &"),
+            offer="python3 download_fics.py",
         ),
         Flow(
-            "Import into Calibre",
+            "Send them to the server",
             (
-                "Drag the EPUBs from downloaded/ into Calibre, or add them from a terminal.",
-                "The custom columns fill in on import - create them first, either in Calibre",
-                "or with `backfill.py setup-columns`. See docs/TUTORIAL.md.",
+                "Adds new works to the library folder on the server and replaces the files of",
+                "works BookOrbit already holds, in place. Adding and replacing are asked",
+                "separately. Then it waits for BookOrbit to pick up the new books and fills in",
+                "their custom fields. Deletes nothing; empty downloaded/ yourself.",
             ),
-            commands=(f"calibredb add --library-path {shown} downloaded/",),
+            commands=("python3 send_to_server.py",),
+            offer="python3 send_to_server.py",
         ),
         Flow(
-            "Repair EPUBs already in the library",
+            "Back up the server",
             (
-                "Rewrites files no reader but Calibre can open, and adds the AO3 rating tag",
-                "where it is missing. Offline, and every original is copied first.",
+                "Copies BookOrbit's whole folder on the server into BACKUP_DIR on this PC with",
+                "one rsync. The first run copies everything; later runs only what changed.",
             ),
-            commands=(
-                f"python3 backfill.py repair-epubs --library {shown} \\\n"
-                f"    --epub-backup-dir {EPUB_BACKUP_DIR} --dry-run",
-                f"python3 backfill.py repair-epubs --library {shown} \\\n"
-                f"    --epub-backup-dir {EPUB_BACKUP_DIR} --approve-epub-write",
-            ),
-        ),
-        Flow(
-            "Copy the files to a reading server",
-            (
-                "rsync sends only what changed. Define the server once in ~/.ssh/config so no",
-                "host or key appears in the command, then run the dry run first.",
-            ),
-            commands=(
-                "rsync -rt --stats --dry-run downloaded/ myserver:/path/to/library/fanfiction/",
-                "rsync -rt --stats downloaded/ myserver:/path/to/library/fanfiction/",
-            ),
-        ),
-        Flow(
-            "Publish the numbers to BookOrbit",
-            (
-                "A library server reads tags out of each file, but never custom-field values,",
-                "so kudos, hits and word counts are sent to its API once per book.",
-                "Optional: without BOOKORBIT_URL the command says so and stops.",
-            ),
-            commands=(
-                "python3 backfill.py bookorbit-sync --library downloaded --dry-run",
-                "python3 backfill.py bookorbit-sync --library downloaded",
-            ),
-            preview="python3 backfill.py bookorbit-sync --library downloaded --dry-run",
+            commands=("python3 backup_server.py",),
+            offer="python3 backup_server.py",
         ),
         Flow(
             "Read the documentation",
@@ -260,9 +226,8 @@ def main(
 ) -> int:
     """Show the setup check and the menu, and keep showing it until asked to stop."""
 
-    library = library_path()
-    render(screen(setup_checks(library=library)), emit)
-    available = flows(library)
+    render(screen(setup_checks()), emit)
+    available = flows()
     titles = tuple(flow.title for flow in available)
 
     while True:
@@ -274,16 +239,15 @@ def main(
             return 0
         flow = available[chosen]
         render(describe(flow), emit)
-        if flow.preview is None:
-            emit("")
-            continue
         emit("")
-        if prompts.confirm(f"Run `{flow.preview}` now?", default=False, assume_yes=assume_yes):
-            run_command(flow.preview, runner=runner)
+        if flow.offer is None:
+            continue
+        if prompts.confirm(f"Run `{flow.offer}` now?", default=False, assume_yes=assume_yes):
+            run_command(flow.offer, runner=runner)
 
 
 def run() -> None:
-    """Command-line entry point used by ``archiver.py``."""
+    """Command-line entry point used by ``start_here.py``."""
 
     try:
         raise SystemExit(main())

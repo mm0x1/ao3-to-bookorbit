@@ -1,9 +1,12 @@
 """Tests for the front door: the setup check, the menu, and the commands it prints."""
 
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
+
+import requests
 
 from ao3archiver import welcome
 
@@ -16,26 +19,40 @@ def details(checks):
     return {check.label: check.detail for check in checks}
 
 
-class LibraryPathTest(unittest.TestCase):
-    def test_the_environment_wins_over_the_dotenv_file(self):
+SERVER_SETTINGS = (
+    "SERVER=myserver\nSERVER_BOOKORBIT_DIR=/srv/bookorbit\nSERVER_LIBRARY_DIR=/srv/bookorbit/fanfiction\n"
+    "BOOKORBIT_LIBRARY_PATH_IN_CONTAINER=/books/fanfiction\nBACKUP_DIR=/backups/bookorbit\n"
+)
+
+
+class ServerCheckTest(unittest.TestCase):
+    def check(self, text):
         with tempfile.TemporaryDirectory() as directory:
             dotenv = Path(directory) / ".env"
-            dotenv.write_text("CALIBRE_LIBRARY=/from/the/file\n", encoding="utf-8")
+            dotenv.write_text(text, encoding="utf-8")
+            return welcome.server_check({}, dotenv_path=dotenv)
 
-            found = welcome.library_path({"CALIBRE_LIBRARY": "/from/the/environment"}, dotenv_path=dotenv)
+    def test_every_setting_present_is_ok(self):
+        check = self.check(SERVER_SETTINGS)
 
-        self.assertEqual(found, Path("/from/the/environment"))
+        self.assertTrue(check.ok)
+        self.assertEqual(check.detail, "myserver:/srv/bookorbit/fanfiction")
 
-    def test_an_unset_library_is_not_guessed(self):
-        with tempfile.TemporaryDirectory() as directory:
-            self.assertIsNone(welcome.library_path({}, dotenv_path=Path(directory) / ".env"))
+    def test_the_missing_settings_are_named(self):
+        check = self.check("SERVER=myserver\n")
 
-    def test_a_home_relative_path_is_expanded(self):
-        with tempfile.TemporaryDirectory() as directory:
-            found = welcome.library_path({"CALIBRE_LIBRARY": "~/Calibre Library"},
-                                         dotenv_path=Path(directory) / ".env")
+        self.assertFalse(check.ok)
+        self.assertIn("SERVER_BOOKORBIT_DIR", check.detail)
+        self.assertIn("BACKUP_DIR", check.detail)
+        self.assertNotIn("SERVER,", check.detail)
 
-        self.assertEqual(found, Path.home() / "Calibre Library")
+    def test_a_setting_a_command_would_refuse_is_flagged_here_first(self):
+        check = self.check(
+            SERVER_SETTINGS.replace("SERVER_BOOKORBIT_DIR=/srv/bookorbit", "SERVER_BOOKORBIT_DIR=bookorbit")
+        )
+
+        self.assertFalse(check.ok)
+        self.assertIn("absolute path", check.detail)
 
 
 class SetupCheckTest(unittest.TestCase):
@@ -54,7 +71,7 @@ class SetupCheckTest(unittest.TestCase):
             "links_dir": self.root / "links",
             "output_dir": self.root / "downloaded",
         }
-        return welcome.setup_checks(**{**defaults, "library": None, **options})
+        return welcome.setup_checks(**{**defaults, **options})
 
     def test_a_bare_clone_says_what_is_missing_without_failing(self):
         checks = self.checks()
@@ -72,21 +89,34 @@ class SetupCheckTest(unittest.TestCase):
         self.assertEqual(marks(checks)["AO3 credentials"], True)
         self.assertNotIn("hunter2", "".join(details(checks).values()))
 
-    def test_an_unused_library_and_bookorbit_are_neither_right_nor_wrong(self):
+    def test_an_unused_bookorbit_is_neither_right_nor_wrong(self):
         checks = self.checks()
 
-        self.assertIsNone(marks(checks)["Calibre library"], "only the backfill needs one")
-        self.assertIsNone(marks(checks)["BookOrbit"], "most libraries never use it")
+        self.assertIsNone(marks(checks)["BookOrbit"], "the download works without it")
+        self.assertIn("send_to_server.py", details(checks)["BookOrbit"])
 
-    def test_a_library_is_only_a_library_with_a_metadata_db(self):
-        library = self.root / "Calibre Library"
-        library.mkdir()
+    def test_calibre_is_no_longer_part_of_the_setup(self):
+        self.assertNotIn("Calibre library", marks(self.checks()))
 
-        self.assertEqual(marks(self.checks(library=library))["Calibre library"], False)
+    def test_missing_server_settings_are_reported_not_fatal(self):
+        self.assertEqual(marks(self.checks())["Server settings"], False)
 
-        (library / "metadata.db").write_bytes(b"")
+    def test_the_check_stays_offline_with_everything_configured(self):
+        """The screen must be instant even when the server is down."""
 
-        self.assertEqual(marks(self.checks(library=library))["Calibre library"], True)
+        (self.root / ".env").write_text(
+            SERVER_SETTINGS + "BOOKORBIT_URL=http://books.example\nBOOKORBIT_USERNAME=a\nBOOKORBIT_PASSWORD=b\n",
+            encoding="utf-8",
+        )
+
+        def offline(*args, **options):
+            raise AssertionError("the setup check went to the network")
+
+        with patch.object(subprocess, "Popen", offline), patch.object(requests.Session, "request", offline):
+            checks = self.checks()
+
+        self.assertEqual(marks(checks)["Server settings"], True)
+        self.assertEqual(marks(checks)["BookOrbit"], True)
 
     def test_links_and_downloads_are_counted(self):
         links = self.root / "links"
@@ -107,25 +137,37 @@ class SetupCheckTest(unittest.TestCase):
 
 
 class FlowTest(unittest.TestCase):
-    def test_a_known_library_lands_in_the_printed_commands(self):
-        commands = "\n".join(
-            command for flow in welcome.flows(Path("/srv/Calibre Library")) for command in flow.commands
+    def test_the_menu_is_the_pipeline_in_order(self):
+        self.assertEqual(
+            [flow.title for flow in welcome.flows()],
+            [
+                "Harvest links from AO3",
+                "Download the works",
+                "Send them to the server",
+                "Back up the server",
+                "Read the documentation",
+            ],
         )
 
-        self.assertIn('"/srv/Calibre Library"', commands)
-        self.assertNotIn(welcome.LIBRARY_PLACEHOLDER, commands)
+    def test_each_of_the_three_scripts_is_offered_since_each_asks_first(self):
+        offered = [flow.offer for flow in welcome.flows() if flow.offer is not None]
 
-    def test_without_one_the_command_still_shows_its_shape(self):
-        commands = "\n".join(command for flow in welcome.flows() for command in flow.commands)
+        self.assertEqual(
+            offered, ["python3 download_fics.py", "python3 send_to_server.py", "python3 backup_server.py"]
+        )
+        for command in offered:
+            self.assertTrue((welcome.REPO_ROOT / command.split()[1]).is_file(), command)
 
-        self.assertIn(welcome.LIBRARY_PLACEHOLDER, commands)
-
-    def test_only_read_only_steps_are_offered_to_run(self):
-        """Anything that writes is printed for the person to run themselves."""
-
+    def test_an_offered_command_is_one_of_the_printed_ones(self):
         for flow in welcome.flows():
-            if flow.preview is not None:
-                self.assertIn("--dry-run", flow.preview, flow.title)
+            if flow.offer is not None:
+                self.assertIn(flow.offer, flow.commands, flow.title)
+
+    def test_the_retired_backfill_is_documented_not_offered(self):
+        text = "\n".join(line for flow in welcome.flows() for line in (*flow.explanation, *flow.commands))
+
+        self.assertNotIn("backfill.py", "\n".join(command for flow in welcome.flows() for command in flow.commands))
+        self.assertIn("docs/BACKFILL.md", text)
 
 
 class MenuTest(unittest.TestCase):
@@ -139,9 +181,6 @@ class MenuTest(unittest.TestCase):
         patcher = patch.object(welcome, "setup_checks", lambda **options: self.CHECKS)
         patcher.start()
         self.addCleanup(patcher.stop)
-        library = patch.object(welcome, "library_path", lambda *args, **options: None)
-        library.start()
-        self.addCleanup(library.stop)
 
     def emit(self, line):
         self.lines.append(line)
@@ -169,14 +208,14 @@ class MenuTest(unittest.TestCase):
     def test_a_chosen_flow_prints_the_exact_command_before_offering_to_run_it(self):
         self.main(choices=(1,), confirmations=(False,))
 
-        self.assertIn("$ python3 download_fics.py --dry-run", self.text())
-        self.assertIn("$ python3 download_fics.py", self.text())
+        self.assertIn("$ python3 download_fics.py\n", self.text() + "\n")
+        self.assertIn("$ nohup python3 download_fics.py &", self.text())
         self.assertEqual(self.ran, [], "a declined offer runs nothing")
 
     def test_accepting_runs_exactly_the_command_that_was_printed(self):
         self.main(choices=(1,), confirmations=(True,))
 
-        self.assertEqual(self.ran, [["python3", "download_fics.py", "--dry-run"]])
+        self.assertEqual(self.ran, [["python3", "download_fics.py"]])
 
     def test_a_flow_with_nothing_to_run_just_explains_itself(self):
         self.main(choices=(0,))

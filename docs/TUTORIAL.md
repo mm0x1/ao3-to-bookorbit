@@ -1,17 +1,17 @@
-# Tutorial: from an AO3 search to a sortable library
+# Tutorial: from an AO3 search to your library server
 
-The whole thing, end to end, once. Every step links to the reference guide that
-holds its options. Nothing here needs the step before it to have gone perfectly:
-each command can be rerun, and each one says what it would do before it does it.
+The whole pipeline, end to end, once. Every step links to the reference guide
+that holds its details. Nothing here needs the step before it to have gone
+perfectly: each command can be rerun, and each one shows what it is about to do
+and asks before it does it.
 
 1. [Before you start](#before-you-start)
 2. [Harvest links](#1-harvest-links)
 3. [Download](#2-download)
-4. [Import into Calibre](#3-import-into-calibre)
-5. [Repair what a reader cannot open](#4-repair-what-a-reader-cannot-open)
-6. [Copy to a reading server](#5-copy-to-a-reading-server-optional)
-7. [Publish the numbers](#6-publish-the-numbers-optional)
-8. [What goes into each EPUB](#what-goes-into-each-epub)
+4. [Send to the server](#3-send-to-the-server)
+5. [Back up the server](#4-back-up-the-server)
+6. [Without a server: Calibre](#without-a-server-calibre)
+7. [What goes into each EPUB](#what-goes-into-each-epub)
 
 ## Before you start
 
@@ -22,17 +22,128 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Fill in `AO3_USERNAME` and `AO3_PASSWORD` in `.env`. It is ignored by Git, and
-no tool here prints, logs or stores those values.
-[docs/CONFIGURATION.md](CONFIGURATION.md) lists every key.
+Fill in `.env`. It is ignored by Git, and no command here ever writes it — you
+do, once — and no tool prints, logs or stores its passwords.
+[docs/CONFIGURATION.md](CONFIGURATION.md) lists every key; in short:
 
-`python3 archiver.py` checks all of this and prints the command for each step
-below, so you can follow along from there instead of reading this file.
+- `AO3_USERNAME`, `AO3_PASSWORD` — an ordinary AO3 account, for downloading.
+- `BOOKORBIT_URL`, `BOOKORBIT_USERNAME`, `BOOKORBIT_PASSWORD`, and
+  `BOOKORBIT_LIBRARY_ID` — so the download knows what you already own, and the
+  send can fill in BookOrbit's fields.
+- `SERVER`, `SERVER_BOOKORBIT_DIR`, `SERVER_LIBRARY_DIR`,
+  `BOOKORBIT_LIBRARY_PATH_IN_CONTAINER` and `BACKUP_DIR` — where the library is
+  on the server, how BookOrbit sees it, and where the backup goes.
 
-**Calibre custom columns must exist before you import anything.** Calibre
-silently drops values for columns a library does not have. Create them once,
-either in *Preferences → Add your own columns* or with
-[`backfill.py setup-columns`](BACKFILL.md#2-create-the-columns-after-a-verified-backup):
+`SERVER` is an alias from `~/.ssh/config`, so no host, user or key ever appears
+in a command ([the SSH alias](CONFIGURATION.md#the-ssh-alias)). Check that
+`ssh myserver` works on its own before going on.
+
+In BookOrbit, once: create the custom fields, and turn on the library's folder
+watch ([docs/BOOKORBIT.md](BOOKORBIT.md#one-time-setup-the-custom-fields)).
+
+Then run the front door. It checks all of the above without touching the
+network, and offers each step below:
+
+```sh
+python3 start_here.py
+```
+
+## 1. Harvest links
+
+1. Set up [ao3downloader](https://github.com/nianeyna/ao3downloader) following
+   its README, including the Python version it asks for.
+2. Run `python ao3downloader.py` and choose
+   `l: get all work links from an ao3 listing (saves links only)`.
+3. Paste the URL of an AO3 search results page. Logging in is optional.
+4. Repeat for as many searches as you like.
+
+Copy the resulting `.txt` files into a `links/` folder in this repository.
+Duplicate links across files are fine: they are counted and collapsed. Let
+ao3downloader finish before downloading: both sign in to the same AO3 account,
+and the download warns if it is still running.
+
+## 2. Download
+
+```sh
+python3 download_fics.py
+```
+
+First it asks BookOrbit which of the linked works are already on the server, by
+AO3 work ID, and shows the plan: how many works are new, how many you already
+have unfinished, how many finished, and an estimated finish time. Then it asks
+at most three questions, all before the first request to AO3:
+
+- *Check AO3 for new chapters of the unfinished ones?* Yes by default: one
+  request each, and the EPUB is downloaded only if AO3 has more chapters.
+- *Download the finished ones again anyway?* No by default.
+- *Start this download now?*
+
+For each work it fetches, the script reads the AO3 work page, skips and records
+anything AO3 reports as deleted or unrevealed, downloads the EPUB from the
+page's own Download link, calculates local Words and Gunning Fog from the file,
+then writes everything into the EPUB and reads it back.
+
+A run of tens of thousands of works takes days. Start it in the background and
+follow the log; off a terminal every question takes its default:
+
+```sh
+nohup python3 download_fics.py &
+tail -f "$(ls -t ~/.local/share/ao3-calibre-backfill/logs/download-*.log | head -1)"
+```
+
+Ctrl-C (or `kill`) stops at the next safe point, prints a summary, and leaves
+the run resumable: run the same command again. `--dry-run` shows the plan and
+stops. [docs/DOWNLOADING.md](DOWNLOADING.md) covers every option and what
+happens when AO3 has a bad day.
+
+## 3. Send to the server
+
+```sh
+python3 send_to_server.py
+```
+
+It knows each EPUB in `downloaded/` by the work ID inside it. A work BookOrbit
+does not hold is added to `SERVER_LIBRARY_DIR` as `<work id>.epub`; a work it
+already holds replaces that book's file where it is, so BookOrbit keeps it as the
+same book; a file already on the server is left alone. An rsync dry run decides
+which is which, and the plan lists every replacement before asking:
+
+```text
+Add 9 new book(s) to the server? [Y/n]
+Replace 2 book(s) on the server? [y/N]
+```
+
+Replacing defaults to no. BookOrbit re-reads a replaced file at once and
+replaces the book's unlocked metadata from it, so back up first (the next step)
+and export BookOrbit's metadata as a snapshot.
+
+Then it waits for BookOrbit's folder watch to pick up the new books — about half
+a minute — and fills in their custom fields: kudos, hits, word counts and the
+rest, which BookOrbit never reads out of a file. Running it again sends nothing
+twice. It deletes nothing: empty `downloaded/` yourself once you are happy.
+[docs/SERVER.md](SERVER.md#sending) has the details.
+
+## 4. Back up the server
+
+```sh
+python3 backup_server.py
+```
+
+One rsync pull of everything under `SERVER_BOOKORBIT_DIR` into `BACKUP_DIR`.
+The first run copies the whole library and can take hours; later runs copy only
+what changed. It deletes nothing on either side, and makes no archive: taking
+the backup on to a drive or a cloud folder is up to you.
+[docs/SERVER.md](SERVER.md#backing-up) has the details.
+
+## Without a server: Calibre
+
+The EPUBs are Calibre-ready on their own: every file carries Calibre column
+values, so importing it fills Calibre's custom columns. Without BookOrbit the
+download cannot tell what you already own, says so, and downloads every work.
+
+**Create the custom columns before you import anything.** Calibre silently
+drops values for columns a library does not have. Create them once in
+*Preferences → Add your own columns*:
 
 | Lookup name | Heading | Type |
 | --- | --- | --- |
@@ -47,155 +158,38 @@ either in *Preferences → Add your own columns* or with
 | `words` | Words | Integers |
 | `gfog` | Gfog | Floating point numbers |
 
-## 1. Harvest links
-
-1. Set up [ao3downloader](https://github.com/nianeyna/ao3downloader) following
-   its README, including the Python version it asks for.
-2. Run `python ao3downloader.py` and choose
-   `l: get all work links from an ao3 listing (saves links only)`.
-3. Paste the URL of an AO3 search results page. Logging in is optional.
-4. Repeat for as many searches as you like.
-
-Copy the resulting `.txt` files into a `links/` folder in this repository.
-Duplicate links across files are fine: they are counted and collapsed.
-
-## 2. Download
-
-Preview the plan first, then run it:
-
-```sh
-python3 download_fics.py --dry-run
-python3 download_fics.py
-```
-
-The plan shows how many links there are, how many are duplicates, how many are
-already done, and an estimated finish time. At a terminal the real run shows the
-same plan and asks once before the first request; under `nohup` there is nobody
-to ask, so it starts. Every run after the first resumes automatically: finished
-EPUBs are skipped and half-finished ones are completed.
-
-For each work the script reads the AO3 work page, skips and records anything AO3
-reports as deleted or unrevealed, downloads the EPUB from the page's own
-Download link, calculates local Words and Gunning Fog from the file, then writes
-everything into the EPUB and reads it back to confirm Calibre will see it.
-
-A run of tens of thousands of works takes days. Start it in the background and
-follow the log:
-
-```sh
-nohup python3 download_fics.py &
-tail -f "$(ls -t ~/.local/share/ao3-calibre-backfill/logs/download-*.log | head -1)"
-```
-
-Ctrl-C (or `kill`) stops at the next safe point, prints a summary, and leaves
-the run resumable. [docs/DOWNLOADING.md](DOWNLOADING.md) covers every option and
-what happens when AO3 has a bad day.
-
-## 3. Import into Calibre
-
-Drag the EPUBs from `downloaded/` into Calibre, or add them with `calibredb`:
+Then drag the EPUBs from `downloaded/` into Calibre, or add them with
+`calibredb`:
 
 ```sh
 calibredb add --library-path "/path/to/Calibre Library" downloaded/
 ```
 
-The ten custom columns fill in on import, and each book also gets its AO3 work
-URL as an `ao3` identifier. Sort by **AO3 Kudos**, or search numerically:
-`#ao3_kudos:>1000`, `#words:<20000`, `#gfog:<8`. `#ao3_chapters:"~[?]"` finds
-works whose final chapter count is still unknown (`3/?`), which covers most
-works in progress; a work with a declared total, such as `3/10`, does not match.
-(A plain `"?"` matches every book.)
+Sort by **AO3 Kudos**, or search numerically: `#ao3_kudos:>1000`,
+`#words:<20000`, `#gfog:<8`. `#ao3_chapters:"~[?]"` finds works whose final
+chapter count is still unknown (`3/?`), which covers most works in progress; a
+work with a declared total, such as `3/10`, does not match. (A plain `"?"`
+matches every book.)
 
 **Calibre-Web** reads the same columns from Calibre's database. Restart it or
 rescan after importing, and check that its setting for ignored custom columns
 does not match `ao3_`.
 
-**A library you already have** is a different job: see
-[docs/BACKFILL.md](BACKFILL.md), which fills the same columns for books that are
-already in Calibre and then bakes each book's metadata into its file.
-
-## 4. Repair what a reader cannot open
-
-Only needed for files that came from somewhere else, or from an older version of
-this project. It makes no AO3 requests and reads nothing from Calibre's
-database:
-
-```sh
-python3 backfill.py repair-epubs --library "/path/to/Calibre Library" \
-  --epub-backup-dir ~/.local/share/ao3-calibre-backfill/epub-originals-repair \
-  --dry-run
-```
-
-The dry run prints what each file needs and writes nothing. At a terminal, the
-same command without `--dry-run` shows those counts and asks before rewriting;
-in a script, pass `--approve-epub-write`. Every original is copied first. See
-[docs/BACKFILL.md](BACKFILL.md#repair-epubs).
-
-## 5. Copy to a reading server (optional)
-
-Define the server once in `~/.ssh/config`, so no host, user or key ever appears
-in a command:
-
-```sshconfig
-Host myserver
-    HostName 192.0.2.10
-    User reader
-    IdentityFile ~/.ssh/myserver
-```
-
-Then copy the freshly downloaded EPUBs. `-t` keeps each file's timestamp, which
-is how a library server notices which files changed:
-
-```sh
-rsync -rt --stats --dry-run downloaded/ myserver:/path/to/library/fanfiction/
-rsync -rt --stats downloaded/ myserver:/path/to/library/fanfiction/
-```
-
-Run the dry run first: it prints exactly how many files would be sent and how
-much data, and changes nothing. Nothing is ever deleted on the server, because
-`--delete` is not used.
-
-To send a whole Calibre library instead, keeping its `Author/Title (id)/`
-folders and skipping Calibre's own working directories:
-
-```sh
-rsync -rt --stats --prune-empty-dirs \
-  --exclude='/.caltrash/' --exclude='/.calnotes/' \
-  --include='*/' --include='*.epub' --include='cover.jpg' --exclude='*' \
-  "/path/to/Calibre Library/" myserver:/path/to/library/fanfiction/
-```
-
-Both commands are safe to repeat: rsync sends only what changed, and for a book
-whose metadata was rewritten it sends only the changed part of the file.
-
-## 6. Publish the numbers (optional)
-
-A library server reads titles, authors, tags and genres out of each file, so
-those arrive with the file itself — including the AO3 rating, which is a tag.
-Numbers are different: a server can sort by a custom field, but its scanner
-never reads custom-field values out of a file, so they have to be sent to its
-API once per book.
-
-```sh
-python3 backfill.py bookorbit-sync --library downloaded --dry-run
-python3 backfill.py bookorbit-sync --library downloaded
-```
-
-Without `BOOKORBIT_URL` the command says so and stops; nothing else in this
-project touches BookOrbit or needs it. [docs/BOOKORBIT.md](BOOKORBIT.md) has the
-fields to create, the account permissions, and what to expect from a rescan.
+**A Calibre library you already have** is a different job, done once, by the
+retired backfill: [docs/BACKFILL.md](BACKFILL.md). It fills the same columns for
+books already in Calibre, bakes each book's metadata into its file, and repairs
+files some readers cannot open.
 
 ## What goes into each EPUB
 
 AO3's EPUB export does not include the work's statistics, so they are read from
 the work page and written into the file in three forms:
 
-- **Calibre column values** (`calibre:user_metadata`), which fill the custom
-  columns on import;
+- **Calibre column values** (`calibre:user_metadata`), which fill Calibre's
+  custom columns on import;
 - **portable `ao3:*` metadata** and an `ao3` identifier, which travel with the
-  file outside Calibre;
-- **a visible "AO3 statistics" block** in the description, shown in Calibre's
-  comments.
+  file anywhere — they are what `send_to_server.py` sends to BookOrbit's fields;
+- **a visible "AO3 statistics" block** in the description.
 
 | Column | From | Notes |
 | --- | --- | --- |
@@ -212,17 +206,18 @@ blanks a column.
 
 The work's **rating** is a tag rather than a column: it is written as a
 `dc:subject`, beside the tags AO3's own export already puts there, so Calibre
-shows it as a Tag and other libraries as a Genre with nothing to configure.
-AO3's exports usually carry it already; when one does not, it is taken from the
-work page that was fetched anyway, or from the EPUB's own front page. A work
-whose rating cannot be found anywhere is still saved, with a warning and a count
-in the run summary.
+shows it as a Tag and BookOrbit as a Genre with nothing to configure. AO3's
+exports usually carry it already; when one does not, it is taken from the work
+page that was fetched anyway, or from the EPUB's own front page. A work whose
+rating cannot be found anywhere is still saved, with a warning and a count in
+the run summary.
 
 EPUB metadata is written with unprefixed element names under a default
 namespace, the form AO3 and Calibre both produce. `<opf:package>` means the same
 thing, but readers that look elements up by their literal name disagree:
 Calibre's importer skips a prefixed custom column, and some readers show an
-empty book. That is what [`repair-epubs`](BACKFILL.md#repair-epubs) fixes.
+empty book. That is what [`repair-epubs`](BACKFILL.md#repair-epubs) fixes in
+files from elsewhere.
 
 ---
 

@@ -1,15 +1,22 @@
 # Backfilling a Calibre library
 
-`backfill.py` fills the AO3 columns for EPUBs that are **already in a Calibre
-library**, once, and then bakes each book's full metadata into its EPUB file. It
-is a one-time job with a stage per command, each behind its own gate.
+> **Retired.** Calibre is no longer part of the pipeline: each file carries its
+> own AO3 values, and the library lives on a server
+> ([docs/SERVER.md](SERVER.md)). The backfill still works, for anyone
+> with a Calibre library that already holds AO3 EPUBs, but it is kept out of the
+> everyday set, at `retired/calibre_backfill.py`.
+
+`retired/calibre_backfill.py` fills the AO3 columns for EPUBs that are **already
+in a Calibre library**, once, and then bakes each book's full metadata into its
+EPUB file. It is a one-time job with a stage per command, each behind its own
+gate.
 
 Steps 1–5 change only Calibre's custom columns. Step 6 rewrites the EPUB files,
 after backing up every original. Every stage that talks to AO3 or changes the
 library needs an explicit `--approve-…` flag.
 
 **Close Calibre and Calibre-Web first.** The commands that change the library
-check this and refuse to run otherwise; `backfill.py processes` says what is
+check this and refuse to run otherwise; `retired/calibre_backfill.py processes` says what is
 still holding it.
 
 1. [The walkthrough](#the-walkthrough)
@@ -24,7 +31,7 @@ still holding it.
 Maps every EPUB to its AO3 work from the preface and saves a report:
 
 ```sh
-python3 backfill.py scan --library "/path/to/Calibre Library"
+python3 retired/calibre_backfill.py scan --library "/path/to/Calibre Library"
 ```
 
 Local metrics are calculated for the first 25 works by default. Use
@@ -35,8 +42,8 @@ that is needed.
 ### 2. Create the columns, after a verified backup
 
 ```sh
-python3 backfill.py backup --library "/path/to/Calibre Library"
-python3 backfill.py setup-columns --library "/path/to/Calibre Library" \
+python3 retired/calibre_backfill.py backup --library "/path/to/Calibre Library"
+python3 retired/calibre_backfill.py setup-columns --library "/path/to/Calibre Library" \
   --backup "<path printed by backup>" --approve-columns
 ```
 
@@ -48,7 +55,7 @@ Each `backup` creates a new timestamped file, verifies it, and prints the exact
 One round trip, before starting a fetch that runs for days:
 
 ```sh
-python3 backfill.py check-auth --approve-network
+python3 retired/calibre_backfill.py check-auth --approve-network
 ```
 
 ### 4. Fetch AO3 statistics
@@ -57,7 +64,7 @@ Into an append-only cache. At 10 seconds per work, about 15,000 works take
 roughly two days:
 
 ```sh
-nohup python3 backfill.py fetch --library "/path/to/Calibre Library" \
+nohup python3 retired/calibre_backfill.py fetch --library "/path/to/Calibre Library" \
   --use-env-credentials --approve-network \
   --continue-after-review --keep-going --delay 10 --limit 15000 &
 ```
@@ -77,7 +84,7 @@ nohup python3 backfill.py fetch --library "/path/to/Calibre Library" \
 Check progress from another terminal at any time:
 
 ```sh
-python3 backfill.py validate-cache
+python3 retired/calibre_backfill.py validate-cache
 ```
 
 ### 5. Write to Calibre
@@ -86,9 +93,9 @@ Fill in any missing local metrics, take a backup immediately before writing, and
 write one book first:
 
 ```sh
-python3 backfill.py calculate-missing-metrics --library "/path/to/Calibre Library"
-python3 backfill.py backup --library "/path/to/Calibre Library"
-python3 backfill.py write --library "/path/to/Calibre Library" \
+python3 retired/calibre_backfill.py calculate-missing-metrics --library "/path/to/Calibre Library"
+python3 retired/calibre_backfill.py backup --library "/path/to/Calibre Library"
+python3 retired/calibre_backfill.py write --library "/path/to/Calibre Library" \
   --backup "<path printed by backup>" \
   --write-local-metrics --approve-write --limit 1
 ```
@@ -97,11 +104,11 @@ Check that book in Calibre. Then take a fresh backup, since any write
 invalidates the previous one, and write the rest:
 
 ```sh
-python3 backfill.py backup --library "/path/to/Calibre Library"
-python3 backfill.py write --library "/path/to/Calibre Library" \
+python3 retired/calibre_backfill.py backup --library "/path/to/Calibre Library"
+python3 retired/calibre_backfill.py write --library "/path/to/Calibre Library" \
   --backup "<path printed by backup>" \
   --write-local-metrics --approve-write --limit 20000
-python3 backfill.py verify-library --library "/path/to/Calibre Library"
+python3 retired/calibre_backfill.py verify-library --library "/path/to/Calibre Library"
 ```
 
 - The write uses Calibre's own API in a single `calibre-debug` process, one call
@@ -136,8 +143,8 @@ reader, with nothing lost:
 As with the write, take a backup and bake one book first:
 
 ```sh
-python3 backfill.py backup --library "/path/to/Calibre Library"
-python3 backfill.py enrich-epubs --library "/path/to/Calibre Library" \
+python3 retired/calibre_backfill.py backup --library "/path/to/Calibre Library"
+python3 retired/calibre_backfill.py enrich-epubs --library "/path/to/Calibre Library" \
   --backup "<path printed by backup>" \
   --epub-backup-dir ~/.local/share/ao3-calibre-backfill/epub-originals \
   --approve-epub-write --limit 1
@@ -167,7 +174,7 @@ The run works in four passes:
 
 ## Every subcommand
 
-Run `python3 backfill.py <command> --help` for the full option list.
+Run `python3 retired/calibre_backfill.py <command> --help` for the full option list.
 
 | Command | Writes | What it does |
 | --- | --- | --- |
@@ -204,7 +211,7 @@ file with no front-page rating, or one whose existing rating disagrees with its
 front page, is reported and left as it is.
 
 ```sh
-python3 backfill.py repair-epubs --library "/path/to/Calibre Library" \
+python3 retired/calibre_backfill.py repair-epubs --library "/path/to/Calibre Library" \
   --epub-backup-dir ~/.local/share/ao3-calibre-backfill/epub-originals-repair \
   --dry-run
 ```

@@ -82,6 +82,7 @@ SETTINGS: tuple[Setting, ...] = (
     Setting(BACKUP_DIR, "The folder on this PC the backup goes into", "~/Backups/bookorbit", "local"),
 )
 SETTINGS_BY_KEY = {setting.key: setting for setting in SETTINGS}
+ALL_KEYS = tuple(setting.key for setting in SETTINGS)
 
 
 @dataclass(frozen=True)
@@ -151,6 +152,29 @@ def _normalise(setting: Setting, raw: str) -> str:
     return str(path)
 
 
+def _read_values(
+    required: Sequence[str], environ: Mapping[str, str] | None, dotenv_path: Path
+) -> tuple[dict[str, str], list[str]]:
+    values = load_dotenv_values(dotenv_path, keys=required)
+    process_values = os.environ if environ is None else environ
+    from_environment = [key for key in required if key in process_values]
+    for key in from_environment:
+        values[key] = process_values[key]
+    return values, from_environment
+
+
+def missing_settings(
+    required: Sequence[str] = ALL_KEYS,
+    environ: Mapping[str, str] | None = None,
+    *,
+    dotenv_path: Path = DEFAULT_DOTENV_PATH,
+) -> tuple[str, ...]:
+    """The keys that are unset or empty, for a setup check that must not fail or stop."""
+
+    values, _ = _read_values(required, environ, dotenv_path)
+    return tuple(key for key in required if not (values.get(key) or "").strip())
+
+
 def load_server_settings(
     required: Sequence[str],
     environ: Mapping[str, str] | None = None,
@@ -164,12 +188,7 @@ def load_server_settings(
     ``.env`` and nothing is filled in on the user's behalf.
     """
 
-    values = load_dotenv_values(dotenv_path, keys=required)
-    process_values = os.environ if environ is None else environ
-    from_environment = [key for key in required if key in process_values]
-    for key in from_environment:
-        values[key] = process_values[key]
-
+    values, from_environment = _read_values(required, environ, dotenv_path)
     missing = [key for key in required if not (values.get(key) or "").strip()]
     if missing:
         raise ServerError(

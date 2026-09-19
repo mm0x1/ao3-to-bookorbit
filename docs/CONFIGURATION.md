@@ -20,14 +20,11 @@ registered with the logger on load, which redacts them from every later line,
 including the ones written to the failure log.
 
 ```sh
-# AO3, for download_fics.py and backfill.py fetch
+# AO3, for download_fics.py
 AO3_USERNAME=
 AO3_PASSWORD=
 
-# Optional: the Calibre library, read only by archiver.py
-CALIBRE_LIBRARY=
-
-# Optional: BookOrbit, for backfill.py bookorbit-sync
+# BookOrbit, for send_to_server.py and download_fics.py
 BOOKORBIT_URL=
 BOOKORBIT_USERNAME=
 BOOKORBIT_PASSWORD=
@@ -44,8 +41,7 @@ BACKUP_DIR=
 
 | Key | Needed by | Notes |
 | --- | --- | --- |
-| `AO3_USERNAME`, `AO3_PASSWORD` | `download_fics.py`, `backfill.py fetch`, `check-auth` | An ordinary AO3 account. Nothing here posts, comments or kudos. |
-| `CALIBRE_LIBRARY` | `archiver.py` only | The path to your Calibre library, so the front door can check it and fill it into the commands it prints. Every `backfill.py` command still takes `--library` itself. |
+| `AO3_USERNAME`, `AO3_PASSWORD` | `download_fics.py`, and the retired backfill's `fetch` and `check-auth` | An ordinary AO3 account. Nothing here posts, comments or kudos. |
 | `BOOKORBIT_URL` | `send_to_server.py`, `download_fics.py`, `bookorbit-sync` | A bare host (`myserver:8080`) or a full API root. Empty means BookOrbit is simply not in use: `send_to_server.py` then stops, and `download_fics.py` treats every work as new. |
 | `BOOKORBIT_USERNAME`, `BOOKORBIT_PASSWORD` | `send_to_server.py`, `download_fics.py`, `bookorbit-sync` | A dedicated account with **Edit metadata** and **Download**, nothing more. See [docs/BOOKORBIT.md](BOOKORBIT.md#credentials). |
 | `BOOKORBIT_TOKEN` | `send_to_server.py`, `download_fics.py`, `bookorbit-sync` | An `accessToken` instead of an account. Expires after `JWT_EXPIRES_IN`, 15 minutes by default. |
@@ -104,8 +100,7 @@ values:
 using credentials from /path/to/ao3-to-calibre/.env
 ```
 
-`python3 archiver.py` prints the same thing as a setup check, and
-`backfill.py check-auth --approve-network` proves the pair actually signs in.
+`python3 start_here.py` prints the same thing as a setup check.
 
 ## Environment variables
 
@@ -113,16 +108,15 @@ using credentials from /path/to/ao3-to-calibre/.env
 | --- | --- |
 | `AO3_USERNAME`, `AO3_PASSWORD` | Override the credentials from `.env`. |
 | `BOOKORBIT_*` | Override the BookOrbit settings from `.env`. |
-| `CALIBRE_LIBRARY` | Override the library path `archiver.py` uses. |
 | `SERVER`, `SERVER_*`, `BACKUP_DIR` | Override the server settings from `.env`. |
 | `AO3_PROTECTED_PATHS` | Extra directories a cache, report or backup may never be written inside, separated by `:`. The Calibre library and this repository are always protected. Useful if you keep a sibling clone of the link harvester next door. |
 
 ## The SSH alias
 
-Copying files to a reading server is plain `rsync`. Define the server once in
-`~/.ssh/config` so no host, user or key ever appears in a command — or in a
-shell history, or in anything you paste into a bug report. That alias is what
-`SERVER` in `.env` names:
+`send_to_server.py` and `backup_server.py` talk to the server with plain `ssh`
+and `rsync`. Define the server once in `~/.ssh/config` so no host, user or key
+ever appears in a command — or in a shell history, or in anything you paste into
+a bug report. That alias is what `SERVER` in `.env` names:
 
 ```sshconfig
 Host myserver
@@ -131,12 +125,9 @@ Host myserver
     IdentityFile ~/.ssh/myserver
 ```
 
-```sh
-rsync -rt --stats --dry-run downloaded/ myserver:/path/to/library/fanfiction/
-```
-
-[The tutorial](TUTORIAL.md#5-copy-to-a-reading-server-optional) has the variant
-that sends a whole Calibre library.
+Check that `ssh myserver` works on its own first. The commands check the server
+with `ssh -o BatchMode=yes`, which cannot type a password or a key passphrase,
+so use a key that is unlocked or held by `ssh-agent`.
 
 ## Files outside the repository
 

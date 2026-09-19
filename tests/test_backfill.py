@@ -9,6 +9,8 @@ import logging
 import os
 import sqlite3
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 from typing import cast
 import unittest
@@ -18,6 +20,7 @@ from unittest.mock import patch
 import requests
 
 from ao3archiver import ao3_client, backfill, calibre_library, metadata
+from ao3archiver.common import REPO_ROOT
 from ao3archiver.credentials import AO3Credentials
 from ao3archiver.run_log import configure_logging, register_secret, RunInterrupted
 from tests.support import (
@@ -1391,6 +1394,24 @@ class FetchProgressTest(unittest.TestCase):
         self.assertIn("work=64805", output)
         self.assertIn("--- final: 1/1 works ---", output)
         self.assertIn("work=64805", logged)
+
+
+
+class RetiredEntryTest(unittest.TestCase):
+    """The backfill lives in retired/ now; its script must still find the package from there."""
+
+    def test_the_retired_script_runs_from_anywhere(self):
+        script = REPO_ROOT / "retired" / "calibre_backfill.py"
+        environment = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                [sys.executable, str(script), "--help"],
+                cwd=directory, env=environment, capture_output=True, text=True, timeout=60,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("repair-epubs", result.stdout)
+        self.assertIn("bookorbit-sync", result.stdout)
 
 
 if __name__ == "__main__":
