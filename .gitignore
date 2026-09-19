@@ -21,6 +21,5 @@ venv/
 # Local tool settings
 .claude/
 
-# A backup_server.py backup and its zips, for a BACKUP_DIR set to the repository itself
+# A backup_server.py backup, for a BACKUP_DIR set to the repository itself
 /bookorbit/
-/bookorbit-*.zip

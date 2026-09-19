@@ -164,9 +164,8 @@ def flows() -> tuple[Flow, ...]:
             "Back up the server",
             (
                 "Copies BookOrbit's whole folder on the server into a folder of the same name",
-                "in BACKUP_DIR on this PC, with one rsync, then zips it into a new dated zip",
-                "beside it. The first run copies everything; later runs only what changed.",
-                "Every zip is kept: purge old ones yourself.",
+                "in BACKUP_DIR on this PC, with one rsync. The first run copies everything;",
+                "later runs only what changed.",
             ),
             commands=("python3 backup_server.py",),
             offer="python3 backup_server.py",

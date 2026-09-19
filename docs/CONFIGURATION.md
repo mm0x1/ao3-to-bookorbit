@@ -50,7 +50,7 @@ BACKUP_DIR=
 | `SERVER_BOOKORBIT_DIR` | `send_to_server.py`, `backup_server.py` | BookOrbit's folder on the server, as an absolute path such as `/path/to/bookorbit`. The backup copies all of it. |
 | `SERVER_LIBRARY_DIR` | `send_to_server.py` | The folder inside `SERVER_BOOKORBIT_DIR` that new books are added to, such as `/path/to/bookorbit/fanfiction`. It must be inside it, so the backup covers everything sent. |
 | `BOOKORBIT_LIBRARY_PATH_IN_CONTAINER` | `send_to_server.py` | `SERVER_LIBRARY_DIR` as BookOrbit sees it from inside its container, such as `/books/fanfiction`: the start of the file paths BookOrbit reports. It is how a book BookOrbit holds is found on the server to be replaced in place. |
-| `BACKUP_DIR` | `backup_server.py` | The folder on this PC that holds the backup, such as `~/Backups`. The backup is a folder in it named like `SERVER_BOOKORBIT_DIR`'s own, `~/Backups/bookorbit`, and a dated zip of it beside it for every run. `~` is expanded. |
+| `BACKUP_DIR` | `backup_server.py` | The folder on this PC that holds the backup, such as `~/Backups`. The backup is a folder in it named like `SERVER_BOOKORBIT_DIR`'s own: `~/Backups/bookorbit`. `~` is expanded. |
 
 A line must be `KEY=value`. Quotes around a value are stripped, a line whose
 first character is `#` is a comment, and any key not listed above is ignored — one file can hold settings

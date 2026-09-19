@@ -24,7 +24,7 @@ already on disk.
 | 2 | Download | `download_fics.py` | `links/` → `downloaded/` | asks at the start, then unattended |
 | 3 | Send | `send_to_server.py` | `downloaded/` → the server, then BookOrbit's fields | at a terminal |
 | 4 | Scan | BookOrbit's folder watch | — | automatic |
-| 5 | Back up | `backup_server.py` | the server → `BACKUP_DIR` on this PC, then a dated zip | at a terminal |
+| 5 | Back up | `backup_server.py` | the server → `BACKUP_DIR` on this PC | at a terminal |
 
 No command needs a flag in everyday use. Each prints the values it is using and
 its plan, and asks yes or no at the start — never once per book. Settings come
@@ -38,8 +38,8 @@ server; you empty `downloaded/` yourself.
 - **A send adds new works and replaces owned ones in place**, at the book's own
   path, so BookOrbit keeps it as the same book. Replacing is asked separately,
   and defaults to no.
-- **The backup is one rsync pull** of BookOrbit's whole folder, then a dated zip
-  of it. Every zip is kept, so the backups are a history; you purge old ones.
+- **The backup is one rsync pull** of BookOrbit's whole folder: no archive, no
+  database dump, nothing clever.
 
 ## What it looks like
 

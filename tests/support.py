@@ -3,7 +3,7 @@
 from collections.abc import Callable, Sequence
 import io
 import logging
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import re
 import shlex
 import zipfile
@@ -379,11 +379,7 @@ total size is 6  speedup is 0.03
 
 
 class FakeServer:
-    """Stands in for ssh and rsync: answers the folder check and records every command.
-
-    A pull that "succeeds" leaves what a real one would: the server's folder in
-    the destination, holding one EPUB and one empty folder.
-    """
+    """Stands in for ssh and rsync: answers the folder check and records every command."""
 
     def __init__(self, *, folders: Sequence[str] = (), ssh_exit: int | None = None,
                  rsync_exit: int = 0, rsync_output: str = RSYNC_STATS) -> None:
@@ -407,12 +403,6 @@ class FakeServer:
         for line in self.rsync_output.splitlines(keepends=True):
             if echo is not None:
                 echo(line)
-        source, destination = args[-2], args[-1]
-        if self.rsync_exit in (0, 24) and ":" in source and ":" not in destination:
-            pulled = Path(destination) / PurePosixPath(source.split(":", 1)[1]).name
-            (pulled / "fanfiction").mkdir(parents=True, exist_ok=True)
-            (pulled / "comics").mkdir(exist_ok=True)
-            (pulled / "fanfiction" / "111.epub").write_bytes(b"epub bytes")
         return server.RunResult(self.rsync_exit, self.rsync_output)
 
 
