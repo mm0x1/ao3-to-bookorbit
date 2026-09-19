@@ -171,7 +171,7 @@ ao3archiver/
   bookorbit.py              what BookOrbit holds, and publishing the numbers to it
   metadata.py               AO3 page statistics and EPUB metadata
   metrics.py                local Words and Gunning Fog
-  credentials.py            .env / environment / personal.ini
+  credentials.py            AO3 credentials from .env or the environment
   prompts.py                questions that never block an unattended run
   welcome.py                the front door behind start_here.py
   run_log.py                logging, progress and ETA, interrupts

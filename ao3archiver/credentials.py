@@ -1,14 +1,13 @@
-"""One credential path shared by the backfill and the downloader.
+"""One credential path shared by the downloader and the retired backfill.
 
-Values are read from the process environment, the repository-local ``.env``,
-or a legacy ``personal.ini``. Nothing here formats a credential into a message:
-callers only ever learn which source supplied the pair.
+Values are read from the process environment or the repository-local ``.env``.
+Nothing here formats a credential into a message: callers only ever learn which
+source supplied the pair.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-import configparser
 from dataclasses import dataclass
 import os
 from pathlib import Path
@@ -17,8 +16,6 @@ from ao3archiver.common import ArchiverError, REPO_ROOT
 from ao3archiver.run_log import register_secret
 
 DEFAULT_DOTENV_PATH = REPO_ROOT / ".env"
-DEFAULT_INI_PATH = REPO_ROOT / "personal.ini"
-INI_SECTION = "archiveofourown.org"
 CREDENTIAL_KEYS = ("AO3_USERNAME", "AO3_PASSWORD")
 
 
@@ -92,7 +89,7 @@ def load_ao3_credentials(
     password = values.get("AO3_PASSWORD")
     if username is None or password is None or not username.strip() or not password:
         raise CredentialError(
-            "AO3 environment credentials require non-empty AO3_USERNAME and AO3_PASSWORD"
+            f"No AO3 credentials found. Set AO3_USERNAME and AO3_PASSWORD in {dotenv_path} or the environment."
         )
 
     if from_environment and dotenv_values:
@@ -104,60 +101,14 @@ def load_ao3_credentials(
     return AO3Credentials(username=username.strip(), password=password, source=source)
 
 
-def load_ini_credentials(ini_path: Path = DEFAULT_INI_PATH) -> AO3Credentials | None:
-    """Read the legacy ``personal.ini`` pair, or return None when it is unusable."""
-
-    if not Path(ini_path).is_file():
-        return None
-    config = configparser.ConfigParser(interpolation=None)
-    try:
-        config.read(ini_path)
-    except configparser.Error as error:
-        raise CredentialError(f"Could not read {ini_path}") from error
-    username = config.get(INI_SECTION, "username", fallback=None)
-    password = config.get(INI_SECTION, "password", fallback=None)
-    if not username or not password:
-        return None
-    return AO3Credentials(username=username.strip(), password=password, source=str(ini_path))
-
-
-def resolve_credentials(
-    *,
-    dotenv_path: Path | None = DEFAULT_DOTENV_PATH,
-    ini_path: Path | None = DEFAULT_INI_PATH,
-    environ: Mapping[str, str] | None = None,
-) -> AO3Credentials:
-    """Prefer the environment/.env pair and fall back to the legacy ini file."""
-
-    try:
-        return load_ao3_credentials(environ, dotenv_path=dotenv_path)
-    except CredentialError as error:
-        fallback = load_ini_credentials(ini_path) if ini_path is not None else None
-        if fallback is None:
-            raise CredentialError(
-                "No AO3 credentials found. Set AO3_USERNAME and AO3_PASSWORD in the "
-                f"environment or {dotenv_path}, or fill in {ini_path}."
-            ) from error
-        return fallback
-
-
 def load_run_credentials(
     *,
-    allow_ini_fallback: bool = False,
     environ: Mapping[str, str] | None = None,
     dotenv_path: Path | None = DEFAULT_DOTENV_PATH,
-    ini_path: Path | None = DEFAULT_INI_PATH,
 ) -> AO3Credentials:
-    """Load the pair a run will sign in with and redact it from every later log line.
+    """Load the pair a run will sign in with and redact it from every later log line."""
 
-    The backfill uses only the environment and ``.env``; downloads may also fall
-    back to the legacy ``personal.ini``.
-    """
-
-    if allow_ini_fallback:
-        credentials = resolve_credentials(dotenv_path=dotenv_path, ini_path=ini_path, environ=environ)
-    else:
-        credentials = load_ao3_credentials(environ, dotenv_path=dotenv_path)
+    credentials = load_ao3_credentials(environ, dotenv_path=dotenv_path)
     register_secret(credentials.username)
     register_secret(credentials.password)
     return credentials

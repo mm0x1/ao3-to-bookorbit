@@ -18,12 +18,7 @@ import subprocess
 from ao3archiver import prompts
 from ao3archiver.bookorbit import BookOrbitError, load_bookorbit_config
 from ao3archiver.common import ArchiverError, REPO_ROOT
-from ao3archiver.credentials import (
-    CredentialError,
-    DEFAULT_DOTENV_PATH,
-    DEFAULT_INI_PATH,
-    resolve_credentials,
-)
+from ao3archiver.credentials import CredentialError, DEFAULT_DOTENV_PATH, load_ao3_credentials
 from ao3archiver.download import DEFAULT_LINKS_DIR, DEFAULT_OUTPUT_DIR, load_link_inventory
 from ao3archiver.server import ALL_KEYS, load_server_settings, missing_settings, ServerError
 
@@ -85,7 +80,6 @@ def server_check(
 def setup_checks(
     *,
     dotenv_path: Path = DEFAULT_DOTENV_PATH,
-    ini_path: Path = DEFAULT_INI_PATH,
     environ: Mapping[str, str] | None = None,
     links_dir: Path = DEFAULT_LINKS_DIR,
     output_dir: Path = DEFAULT_OUTPUT_DIR,
@@ -95,7 +89,7 @@ def setup_checks(
     checks = [Check(".env", dotenv_path.is_file(), str(dotenv_path) if dotenv_path.is_file() else "copy .env.example to .env")]
 
     try:
-        credentials = resolve_credentials(dotenv_path=dotenv_path, ini_path=ini_path, environ=environ)
+        credentials = load_ao3_credentials(environ, dotenv_path=dotenv_path)
         checks.append(Check("AO3 credentials", True, f"from {credentials.source}"))
     except (CredentialError, OSError) as error:
         checks.append(Check("AO3 credentials", False, str(error).split(".")[0]))

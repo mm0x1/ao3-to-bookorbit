@@ -82,16 +82,9 @@ In order of precedence:
 1. **The process environment.** `AO3_USERNAME=… AO3_PASSWORD=… python3 download_fics.py`
    overrides the file, which is useful for a one-off run or a systemd unit.
 2. **`.env`** in the repository root.
-3. **`personal.ini`**, the legacy file, for AO3 credentials only:
 
-   ```ini
-   [archiveofourown.org]
-   username =
-   password =
-   ```
-
-   `download_fics.py` falls back to it; the backfill does not. Copy it from
-   `personal.ini.example` if you already have one from another tool.
+There is no third place: the legacy `personal.ini` is no longer read. Move its
+username and password into `.env`.
 
 Whichever wins, every run logs *which source* supplied the pair — never the
 values:
@@ -153,7 +146,8 @@ command that uses it takes `--cache-dir`, `--log-dir` or `--epub-backup-dir` to
 put it somewhere else.
 
 `links/` and `downloaded/` live in the repository and are both gitignored, along
-with `.env`, `personal.ini` and `*.log`.
+with `.env` and `*.log`. So is `personal.ini`, which is no longer read, so that
+an old one holding a password can never be committed by accident.
 
 ## Confirmations and `--yes`
 

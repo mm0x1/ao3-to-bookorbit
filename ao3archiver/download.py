@@ -623,7 +623,7 @@ def run_downloads(
     sleep_fn: Callable[[float], None] = time.sleep,
     failure_log_path: Path = DEFAULT_FAILURE_LOG,
     lock_path: Path = ACCOUNT_LOCK_PATH,
-    credentials_loader: Callable[[], AO3Credentials] = lambda: load_run_credentials(allow_ini_fallback=True),
+    credentials_loader: Callable[[], AO3Credentials] = load_run_credentials,
     client_factory: ClientFactory = _default_client,
 ) -> RunSummary:
     """Plan the run, then download and enrich every planned work unattended.

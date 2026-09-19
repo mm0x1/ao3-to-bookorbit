@@ -66,7 +66,6 @@ class SetupCheckTest(unittest.TestCase):
     def checks(self, **options):
         defaults = {
             "dotenv_path": self.root / ".env",
-            "ini_path": self.root / "personal.ini",
             "environ": {},
             "links_dir": self.root / "links",
             "output_dir": self.root / "downloaded",

@@ -112,53 +112,20 @@ class LoadAO3CredentialsTest(unittest.TestCase):
         self.assertEqual(resolved.source, str(path))
 
 
-class ResolveCredentialsTest(unittest.TestCase):
-    def test_the_ini_file_is_used_only_when_the_env_pair_is_absent(self):
+class NoLegacyIniTest(unittest.TestCase):
+    def test_a_personal_ini_is_no_longer_read(self):
+        """Support for the legacy file was dropped: only the environment and .env count."""
+
         with tempfile.TemporaryDirectory() as directory:
-            ini = Path(directory) / "personal.ini"
-            ini.write_text(
-                "[archiveofourown.org]\nusername = ini-user\npassword = ini-pass\n",
-                encoding="utf-8",
-            )
-            resolved = credentials.resolve_credentials(
-                dotenv_path=Path("/definitely-missing.env"), ini_path=ini, environ={}
+            (Path(directory) / "personal.ini").write_text(
+                "[archiveofourown.org]\nusername = reader\npassword = hunter22\n", encoding="utf-8"
             )
 
-        self.assertEqual(resolved.as_tuple(), ("ini-user", "ini-pass"))
-        self.assertEqual(resolved.source, str(ini))
+            with self.assertRaises(credentials.CredentialError) as raised:
+                credentials.load_run_credentials(environ={}, dotenv_path=Path(directory) / ".env")
 
-    def test_the_env_pair_wins_over_the_ini_file(self):
-        with tempfile.TemporaryDirectory() as directory:
-            ini = Path(directory) / "personal.ini"
-            ini.write_text(
-                "[archiveofourown.org]\nusername = ini-user\npassword = ini-pass\n",
-                encoding="utf-8",
-            )
-            resolved = credentials.resolve_credentials(
-                dotenv_path=Path("/definitely-missing.env"),
-                ini_path=ini,
-                environ={"AO3_USERNAME": "env-user", "AO3_PASSWORD": "env-pass"},
-            )
-
-        self.assertEqual(resolved.as_tuple(), ("env-user", "env-pass"))
-
-    def test_an_empty_ini_section_is_not_treated_as_credentials(self):
-        with tempfile.TemporaryDirectory() as directory:
-            ini = Path(directory) / "personal.ini"
-            ini.write_text("[archiveofourown.org]\nusername =\npassword =\n", encoding="utf-8")
-            with self.assertRaises(credentials.CredentialError):
-                credentials.resolve_credentials(
-                    dotenv_path=Path("/definitely-missing.env"), ini_path=ini, environ={}
-                )
-
-    def test_the_failure_message_names_both_places_to_look(self):
-        with self.assertRaises(credentials.CredentialError) as raised:
-            credentials.resolve_credentials(
-                dotenv_path=Path("/missing.env"), ini_path=Path("/missing.ini"), environ={}
-            )
-
-        self.assertIn("/missing.env", str(raised.exception))
-        self.assertIn("/missing.ini", str(raised.exception))
+        self.assertIn("AO3_USERNAME", str(raised.exception))
+        self.assertNotIn("hunter22", str(raised.exception))
 
 
 if __name__ == "__main__":
