@@ -2,14 +2,15 @@
 
 Optional. [BookOrbit](https://github.com/bookorbit/bookorbit) is a self-hosted
 library server; this page is for anyone who reads there rather than in Calibre.
-Nothing else in this project touches it, and without `BOOKORBIT_URL` the sync
-says so and exits cleanly.
+`send_to_server.py` needs it; nothing else in this project does, and without
+`BOOKORBIT_URL` the sync says so and exits cleanly.
 
 1. [What the file carries and what it cannot](#what-the-file-carries-and-what-it-cannot)
 2. [One-time setup: the custom fields](#one-time-setup-the-custom-fields)
-3. [Credentials](#credentials)
-4. [Running the sync](#running-the-sync)
-5. [What BookOrbit's own docs do not say](#what-bookorbits-own-docs-do-not-say)
+3. [One-time setup: folder watch](#one-time-setup-folder-watch)
+4. [Credentials](#credentials)
+5. [Filling in the fields](#filling-in-the-fields)
+6. [What BookOrbit's own docs do not say](#what-bookorbits-own-docs-do-not-say)
 
 ## What the file carries and what it cannot
 
@@ -20,8 +21,9 @@ to configure.
 
 Numbers are different. BookOrbit can sort and filter by a custom field, but its
 scanner never reads custom-field values out of a file, so kudos, hits and word
-counts have to be sent to its API once per book. That is all `bookorbit-sync`
-does, reading every value from the EPUBs themselves.
+counts have to be sent to its API once per book. `send_to_server.py` does that
+for every book it sends, and `bookorbit-sync` for a whole folder at once, both
+reading every value from the EPUBs themselves.
 
 ## One-time setup: the custom fields
 
@@ -60,6 +62,18 @@ asks before writing to it.
 **Dates** must be `YYYY-MM-DD`. AO3 words some completion dates differently, and
 those are left empty rather than sent in a form BookOrbit rejects.
 
+Two of the fields do a second job for `send_to_server.py`: **AO3 Link** is how it
+tells which work a book is (a file named `<work id>.epub` works too, before its
+fields are filled), and **AO3 Chapters** is what your copy of the work says.
+
+## One-time setup: folder watch
+
+Turn on BookOrbit's folder watch for the library. `send_to_server.py` copies
+files onto the server and then waits for BookOrbit to notice them; with the watch
+on, a new book appears in about half a minute. With it off, the command gives up
+waiting after three minutes, and the fields of new books are filled in only
+after a scan and another run.
+
 ## Credentials
 
 BookOrbit has no API keys or personal access tokens: the only way in is a
@@ -90,9 +104,15 @@ Sign-ins are rate-limited to five a minute, and the sync says so plainly if it
 hits that. Neither the password nor the token ever appears in a log line, an
 error message, or a URL.
 
-## Running the sync
+## Filling in the fields
 
-Scan the library in BookOrbit first, so every book exists and has an id, then:
+The everyday way is `send_to_server.py` ([docs/SERVER.md](SERVER.md#sending)):
+it sends the files, waits for BookOrbit to pick up the new ones, and fills in
+their fields, all in one run. Nothing else is needed.
+
+`bookorbit-sync` does the same for a whole folder of EPUBs that are already on
+the server — a Calibre library, say. Scan the library in BookOrbit first, so every
+book exists and has an id, then:
 
 ```sh
 python3 backfill.py bookorbit-sync --library downloaded --dry-run

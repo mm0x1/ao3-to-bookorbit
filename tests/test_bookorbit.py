@@ -538,5 +538,98 @@ class SyncTest(unittest.TestCase):
         self.assertEqual(header, "Bearer token-2")
 
 
+
+class OwnedWorksTest(unittest.TestCase):
+    """Which AO3 works BookOrbit already holds, found by work ID rather than by title."""
+
+    FIELDS = [
+        bookorbit.CustomField(7, "AO3 Link", "url", "ao3_link"),
+        bookorbit.CustomField(8, "AO3 Chapters", "text", "ao3_chapters"),
+    ]
+
+    def owned(self, rows):
+        return bookorbit.owned_from_rows(rows, self.FIELDS)
+
+    def test_the_ao3_link_field_names_the_work(self):
+        owned = self.owned([{
+            "bookId": 42,
+            "filePaths": ["/books/fanfiction/Author/Title (7)/Title - Author.epub"],
+            "custom.ao3_link": "https://archiveofourown.org/works/222",
+            "custom.ao3_chapters": "3/?",
+        }])
+
+        work = owned.works["222"]
+        self.assertEqual(work.book_id, 42)
+        self.assertEqual(work.chapters, "3/?")
+        self.assertEqual(work.file_paths, ("/books/fanfiction/Author/Title (7)/Title - Author.epub",))
+
+    def test_a_file_named_after_its_work_is_found_before_its_fields_are_filled(self):
+        owned = self.owned([{"bookId": 50, "filePaths": ["/books/fanfiction/111.epub"]}])
+
+        self.assertEqual(owned.works["111"].book_id, 50)
+        self.assertIsNone(owned.works["111"].chapters)
+
+    def test_the_link_wins_over_the_file_name(self):
+        owned = self.owned([{
+            "bookId": 1, "filePaths": ["/books/fanfiction/111.epub"],
+            "custom.ao3_link": "https://archiveofourown.org/works/222",
+        }])
+
+        self.assertEqual(list(owned.works), ["222"])
+
+    def test_a_work_held_by_two_books_is_never_guessed(self):
+        owned = self.owned([
+            {"bookId": 1, "filePaths": ["/books/fanfiction/111.epub"]},
+            {"bookId": 2, "filePaths": ["/books/fanfiction/Old/Copy (2)/Copy.epub"],
+             "custom.ao3_link": "https://archiveofourown.org/works/111"},
+        ])
+
+        self.assertNotIn("111", owned.works)
+        self.assertEqual(owned.ambiguous["111"], (1, 2))
+
+    def test_a_book_with_no_work_id_anywhere_is_counted_not_guessed(self):
+        owned = self.owned([
+            {"bookId": 1, "filePaths": ["/books/fanfiction/Some Title.epub"]},
+            {"bookId": 2, "filePaths": ["/books/fanfiction/111.epub"]},
+        ])
+
+        self.assertEqual(owned.unidentified, 1)
+        self.assertEqual(owned.books, 2)
+
+    def test_without_a_link_field_only_file_names_count(self):
+        owned = bookorbit.owned_from_rows(
+            [{"bookId": 1, "filePaths": ["/b/Title.epub"], "custom.ao3_link": "https://archiveofourown.org/works/9"}],
+            [],
+        )
+
+        self.assertEqual(owned.works, {})
+
+    def test_the_lookup_is_one_export(self):
+        session = FakeSession(books=[{"bookId": 50, "filePaths": ["/books/fanfiction/111.epub"]}])
+
+        owned = bookorbit.owned_works(client_for(session), 2)
+
+        self.assertEqual(owned.works["111"].book_id, 50)
+        exports = [url for _, url, _ in session.requests if "metadata-export" in url]
+        self.assertEqual(len(exports), 1)
+
+
+class PublishValuesTest(unittest.TestCase):
+    def test_a_pair_is_written_even_when_the_names_differ(self):
+        """A replaced file keeps the server's name, so a send pairs by work ID, not by path."""
+
+        with tempfile.TemporaryDirectory() as directory:
+            epub = write_epub(Path(directory) / "111.epub")
+            session = FakeSession()
+            client = client_for(session)
+            fields = bookorbit.resolve_fields(client.custom_fields())
+            book = {"bookId": 42, "filePaths": ["/books/fanfiction/Author/Title (7)/Title - Author.epub"]}
+
+            summary = bookorbit.publish_values([(epub, book)], client, fields)
+
+        self.assertEqual(summary.updated, ("111.epub",))
+        self.assertEqual({entry["fieldId"]: entry["value"] for entry in session.patches[42]}[3], 68)
+
+
 if __name__ == "__main__":
     unittest.main()

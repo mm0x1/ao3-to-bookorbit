@@ -34,10 +34,11 @@ BOOKORBIT_PASSWORD=
 # BOOKORBIT_TOKEN=
 # BOOKORBIT_LIBRARY_ID=
 
-# The server, for backup_server.py
+# The server, for send_to_server.py and backup_server.py
 SERVER=
 SERVER_BOOKORBIT_DIR=
 SERVER_LIBRARY_DIR=
+BOOKORBIT_LIBRARY_PATH_IN_CONTAINER=
 BACKUP_DIR=
 ```
 
@@ -45,13 +46,14 @@ BACKUP_DIR=
 | --- | --- | --- |
 | `AO3_USERNAME`, `AO3_PASSWORD` | `download.py`, `backfill.py fetch`, `check-auth` | An ordinary AO3 account. Nothing here posts, comments or kudos. |
 | `CALIBRE_LIBRARY` | `archiver.py` only | The path to your Calibre library, so the front door can check it and fill it into the commands it prints. Every `backfill.py` command still takes `--library` itself. |
-| `BOOKORBIT_URL` | `bookorbit-sync` | A bare host (`myserver:8080`) or a full API root. Empty means BookOrbit is simply not in use. |
-| `BOOKORBIT_USERNAME`, `BOOKORBIT_PASSWORD` | `bookorbit-sync` | A dedicated account with **Edit metadata** and **Download**, nothing more. See [docs/BOOKORBIT.md](BOOKORBIT.md#credentials). |
-| `BOOKORBIT_TOKEN` | `bookorbit-sync` | An `accessToken` instead of an account. Expires after `JWT_EXPIRES_IN`, 15 minutes by default. |
-| `BOOKORBIT_LIBRARY_ID` | `bookorbit-sync` | Restrict the sync to one BookOrbit library. Optional. |
-| `SERVER` | `backup_server.py` | The server's alias in `~/.ssh/config`, such as `myserver`. See [the SSH alias](#the-ssh-alias). |
-| `SERVER_BOOKORBIT_DIR` | `backup_server.py` | BookOrbit's folder on the server, as an absolute path such as `/path/to/bookorbit`. The backup copies all of it. |
-| `SERVER_LIBRARY_DIR` | — | The folder inside `SERVER_BOOKORBIT_DIR` that new books are added to, such as `/path/to/bookorbit/fanfiction`. |
+| `BOOKORBIT_URL` | `send_to_server.py`, `bookorbit-sync` | A bare host (`myserver:8080`) or a full API root. Empty means BookOrbit is simply not in use. |
+| `BOOKORBIT_USERNAME`, `BOOKORBIT_PASSWORD` | `send_to_server.py`, `bookorbit-sync` | A dedicated account with **Edit metadata** and **Download**, nothing more. See [docs/BOOKORBIT.md](BOOKORBIT.md#credentials). |
+| `BOOKORBIT_TOKEN` | `send_to_server.py`, `bookorbit-sync` | An `accessToken` instead of an account. Expires after `JWT_EXPIRES_IN`, 15 minutes by default. |
+| `BOOKORBIT_LIBRARY_ID` | `send_to_server.py`, `bookorbit-sync` | Look at one BookOrbit library only. Optional. |
+| `SERVER` | `send_to_server.py`, `backup_server.py` | The server's alias in `~/.ssh/config`, such as `myserver`. See [the SSH alias](#the-ssh-alias). |
+| `SERVER_BOOKORBIT_DIR` | `send_to_server.py`, `backup_server.py` | BookOrbit's folder on the server, as an absolute path such as `/path/to/bookorbit`. The backup copies all of it. |
+| `SERVER_LIBRARY_DIR` | `send_to_server.py` | The folder inside `SERVER_BOOKORBIT_DIR` that new books are added to, such as `/path/to/bookorbit/fanfiction`. It must be inside it, so the backup covers everything sent. |
+| `BOOKORBIT_LIBRARY_PATH_IN_CONTAINER` | `send_to_server.py` | `SERVER_LIBRARY_DIR` as BookOrbit sees it from inside its container, such as `/books/fanfiction`: the start of the file paths BookOrbit reports. It is how a book BookOrbit holds is found on the server to be replaced in place. |
 | `BACKUP_DIR` | `backup_server.py` | The folder on this PC the backup goes into. `~` is expanded. |
 
 A line must be `KEY=value`. Quotes around a value are stripped, a line whose
@@ -62,6 +64,8 @@ the `=`.
 
 ## The server
 
+`send_to_server.py` reads `SERVER`, `SERVER_BOOKORBIT_DIR`, `SERVER_LIBRARY_DIR`
+and `BOOKORBIT_LIBRARY_PATH_IN_CONTAINER`, and the BookOrbit settings above;
 `backup_server.py` reads `SERVER`, `SERVER_BOOKORBIT_DIR` and `BACKUP_DIR`.
 Three rules hold for all of them:
 
@@ -73,7 +77,7 @@ Three rules hold for all of them:
   will run, before it asks to start.
 
 Paths on the server must be absolute; `~` is expanded only in `BACKUP_DIR`,
-which is on this PC. [docs/SERVER.md](SERVER.md) covers the backup itself.
+which is on this PC. [docs/SERVER.md](SERVER.md) covers both commands.
 
 ## Where each value can come from
 
@@ -178,8 +182,9 @@ script has to satisfy. Two exceptions worth knowing:
   always has.
 - `bookorbit-sync` writes to a server, and off a terminal requires `--yes`.
   `--dry-run` needs nothing.
-- `backup_server.py` takes no flags at all, so its question is the only way to
-  say yes. Off a terminal it refuses to start and says why.
+- `send_to_server.py` and `backup_server.py` take no flags at all, so their
+  questions are the only way to say yes. Off a terminal they refuse to start
+  and say why.
 
 ---
 

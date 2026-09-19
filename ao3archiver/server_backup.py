@@ -16,7 +16,6 @@ from collections.abc import Callable, Mapping, Sequence
 import logging
 from pathlib import Path
 import shlex
-import sys
 
 from ao3archiver import prompts
 from ao3archiver.common import ArchiverError
@@ -25,7 +24,6 @@ from ao3archiver.run_log import configure_logging, log_banner
 from ao3archiver.server import (
     BACKUP_DIR,
     default_runner,
-    last_lines,
     load_server_settings,
     remote,
     remote_dir_exists,
@@ -35,16 +33,13 @@ from ao3archiver.server import (
     SERVER_BOOKORBIT_DIR,
     ServerError,
     ServerSettings,
+    transfer,
 )
 
 LOGGER = logging.getLogger("ao3.backup")
 
 COMMAND = "backup_server.py"
 REQUIRED = (SERVER, SERVER_BOOKORBIT_DIR, BACKUP_DIR)
-SUMMARY_START = "Number of files:"
-# rsync's "some files vanished before they could be transferred": BookOrbit
-# wrote while the pull ran. Everything else was copied.
-RSYNC_VANISHED = 24
 
 
 def backup_command(settings: ServerSettings) -> list[str]:
@@ -56,46 +51,6 @@ def backup_command(settings: ServerSettings) -> list[str]:
         "--stats",
         "--info=progress2",
     )
-
-
-def summary_lines(output: str) -> list[str]:
-    """rsync's ``--stats`` block, from its first line to the end."""
-
-    lines = output.replace("\r", "\n").splitlines()
-    for index, line in enumerate(lines):
-        if line.startswith(SUMMARY_START):
-            return [line.strip() for line in lines[index:] if line.strip()]
-    return []
-
-
-class ProgressEcho:
-    """Show rsync's progress on the terminal; its summary goes to the run log instead.
-
-    The progress redraws itself dozens of times a second, which would bury a
-    log file, and the summary would appear twice if it were echoed as well as
-    logged.
-    """
-
-    def __init__(self) -> None:
-        self.in_summary = False
-        self.mid_line = False
-
-    def __call__(self, line: str) -> None:
-        if line.startswith(SUMMARY_START):
-            self.in_summary = True
-        if self.in_summary:
-            return
-        sys.stdout.write(line)
-        sys.stdout.flush()
-        self.mid_line = line.endswith("\r")
-
-    def finish(self) -> None:
-        """End a progress line left open, so the next log line starts clean."""
-
-        if self.mid_line:
-            sys.stdout.write("\n")
-            sys.stdout.flush()
-            self.mid_line = False
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -152,18 +107,7 @@ def main(
         destination.mkdir(parents=True)
 
     LOGGER.info("copying; the first backup copies everything and can take hours")
-    echo = ProgressEcho()
-    result = runner(command, echo=echo)
-    echo.finish()
-    summary = summary_lines(result.output)
-    if summary:
-        LOGGER.info("rsync summary:")
-        for line in summary:
-            LOGGER.info(f"  {line}")
-    if result.returncode == RSYNC_VANISHED:
-        LOGGER.warning("some files changed on the server while they were being copied; the next backup picks them up")
-    elif result.returncode != 0:
-        raise ServerError(f"rsync stopped with exit code {result.returncode}:\n{last_lines(result.output)}")
+    transfer(command, runner, LOGGER)
     LOGGER.info(f"backup complete: {destination}")
     return 0
 

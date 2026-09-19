@@ -92,6 +92,40 @@ class SettingsTest(unittest.TestCase):
             settings.backup_dir
 
 
+class LibraryPathTest(unittest.TestCase):
+    """BookOrbit reports paths inside its container; the server knows them by another root."""
+
+    def settings(self, library="/srv/bookorbit/fanfiction"):
+        with tempfile.TemporaryDirectory() as directory:
+            dotenv = Path(directory) / ".env"
+            dotenv.write_text(
+                "SERVER=myserver\nSERVER_BOOKORBIT_DIR=/srv/bookorbit\n"
+                f"SERVER_LIBRARY_DIR={library}\nBOOKORBIT_LIBRARY_PATH_IN_CONTAINER=/books/fanfiction\n",
+                encoding="utf-8",
+            )
+            return server.load_server_settings(
+                (server.SERVER, server.SERVER_BOOKORBIT_DIR, server.SERVER_LIBRARY_DIR, server.LIBRARY_IN_CONTAINER),
+                {},
+                dotenv_path=dotenv,
+            )
+
+    def test_a_container_path_maps_to_the_servers_own_path(self):
+        found = server.host_path("/books/fanfiction/Author/Title (7)/Title - Author.epub", self.settings())
+
+        self.assertEqual(found, PurePosixPath("/srv/bookorbit/fanfiction/Author/Title (7)/Title - Author.epub"))
+
+    def test_a_path_outside_the_mapped_folder_is_refused(self):
+        for path in ("/books/other/1.epub", "/books/fanfiction-old/1.epub", "/books/fanfiction"):
+            with self.assertRaises(server.ServerError, msg=path):
+                server.host_path(path, self.settings())
+
+    def test_the_library_must_sit_inside_the_folder_the_backup_covers(self):
+        with self.assertRaises(server.ServerError) as caught:
+            self.settings(library="/srv/elsewhere/fanfiction")
+
+        self.assertIn("backup", str(caught.exception))
+
+
 class CommandTest(unittest.TestCase):
     def test_the_remote_shell_sees_the_path_as_one_argument(self):
         command = server.ssh_command("myserver", "test", "-d", "/srv/my books")

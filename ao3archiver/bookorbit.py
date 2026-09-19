@@ -17,7 +17,7 @@ filterable without any of this.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 import logging
 import os
@@ -32,7 +32,7 @@ import requests
 
 from ao3archiver.common import ArchiverError, REPO_ROOT
 from ao3archiver.credentials import load_dotenv_values
-from ao3archiver.metadata import canonical_rating, epub_rating_subjects, read_ao3_metadata
+from ao3archiver.metadata import canonical_rating, epub_rating_subjects, read_ao3_metadata, WORK_ID_PATTERN
 from ao3archiver import prompts
 from ao3archiver.run_log import redact_secrets, register_secret
 
@@ -58,6 +58,8 @@ PROGRESS_EVERY = 500
 CONSECUTIVE_FAILURE_LIMIT = 10
 
 DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# What this project's downloads are called, on disk and so on the server.
+WORK_FILENAME_PATTERN = re.compile(r"^(\d+)\.epub$", re.IGNORECASE)
 
 # What to do about it when the command is run without BookOrbit set up. Not an
 # error: most libraries never use BookOrbit, and every other command works
@@ -497,7 +499,224 @@ def _same_value(current: object, wanted: object, field_type: str) -> bool:
     return str(current) == str(wanted)
 
 
+# --- what the library already holds ------------------------------------------
+
+
+@dataclass(frozen=True)
+class OwnedWork:
+    """One AO3 work BookOrbit holds, and the book that holds it."""
+
+    work_id: str
+    book_id: int
+    file_paths: tuple[str, ...]
+    # AO3 Chapters as the user's copy states it ("3/?", "12/12"), if filled.
+    chapters: str | None
+    row: Mapping[str, object]
+
+
+@dataclass(frozen=True)
+class OwnedLibrary:
+    """Every AO3 work BookOrbit can be seen to hold, by work ID."""
+
+    works: Mapping[str, OwnedWork]
+    # A work claimed by more than one book, and those books' ids: never guessed.
+    ambiguous: Mapping[str, tuple[int, ...]]
+    books: int
+    # Books with neither an AO3 Link value nor a <work id>.epub file name.
+    unidentified: int
+
+
+def _field_key(fields: Iterable[CustomField], label: str) -> str | None:
+    return next((field.key for canonical, field in resolve_fields(fields) if canonical == label), None)
+
+
+def _work_id_of(row: Mapping[str, object], link_key: str | None) -> str | None:
+    """The AO3 Link field when it is filled, else a file named after its work ID."""
+
+    link = row.get(f"custom.{link_key}") if link_key else None
+    match = WORK_ID_PATTERN.search(str(link)) if link else None
+    if match is not None:
+        return match.group(1)
+    paths = row.get("filePaths")
+    for path in paths if isinstance(paths, list) else []:
+        named = WORK_FILENAME_PATTERN.match(PurePath(str(path)).name)
+        if named is not None:
+            return named.group(1)
+    return None
+
+
+def owned_from_rows(rows: Sequence[Mapping[str, object]], fields: Sequence[CustomField]) -> OwnedLibrary:
+    link_key = _field_key(fields, "AO3 Link")
+    chapters_key = _field_key(fields, "AO3 Chapters")
+    claims: dict[str, list[OwnedWork]] = {}
+    unidentified = 0
+    for row in rows:
+        work_id = _work_id_of(row, link_key)
+        try:
+            book_id = int(row["bookId"])  # type: ignore[arg-type]
+        except (KeyError, TypeError, ValueError):
+            unidentified += 1
+            continue
+        if work_id is None:
+            unidentified += 1
+            continue
+        paths = row.get("filePaths")
+        chapters = row.get(f"custom.{chapters_key}") if chapters_key else None
+        claims.setdefault(work_id, []).append(
+            OwnedWork(
+                work_id=work_id,
+                book_id=book_id,
+                file_paths=tuple(str(path) for path in paths) if isinstance(paths, list) else (),
+                chapters=str(chapters) if chapters not in (None, "") else None,
+                row=row,
+            )
+        )
+    works = {work_id: books[0] for work_id, books in claims.items() if len(books) == 1}
+    ambiguous = {
+        work_id: tuple(book.book_id for book in books) for work_id, books in claims.items() if len(books) > 1
+    }
+    return OwnedLibrary(works=works, ambiguous=ambiguous, books=len(rows), unidentified=unidentified)
+
+
+def owned_works(
+    client: BookOrbitClient,
+    library_id: int | None = None,
+    *,
+    fields: Sequence[CustomField] | None = None,
+) -> OwnedLibrary:
+    """Which AO3 works BookOrbit already holds: one export, about three seconds."""
+
+    known = client.custom_fields() if fields is None else fields
+    return owned_from_rows(client.library_books(library_id), known)
+
+
 # --- the sync ---------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class FieldChoice:
+    """The BookOrbit fields a run will fill, and the expected ones that do not exist."""
+
+    usable: tuple[tuple[str, CustomField], ...]
+    missing: tuple[str, ...]
+
+
+def choose_fields(
+    fields: Sequence[CustomField],
+    *,
+    assume_yes: bool = False,
+    ask: Callable[[str, bool], bool] | None = None,
+) -> FieldChoice:
+    """Find the fields to fill, asking about missing and wrongly typed ones up front.
+
+    ``ask(question, default)`` stands in for :func:`prompts.confirm`; either
+    way the questions come before any book is touched.
+    """
+
+    def confirm(question: str, default: bool) -> bool:
+        if ask is not None:
+            return ask(question, default)
+        return prompts.confirm(question, default=default, assume_yes=assume_yes)
+
+    usable = resolve_fields(fields)
+    filled = {label for label, _ in usable}
+    missing = tuple(label for label, _, _ in FIELD_SOURCES if label not in filled)
+    if not usable:
+        LOGGER.warning(
+            "BookOrbit has none of the expected custom fields yet; create them in "
+            "Settings -> Metadata -> Custom Metadata first"
+        )
+        return FieldChoice((), missing)
+    if missing:
+        for label in missing:
+            LOGGER.warning(f"BookOrbit has no custom field labelled {label!r}; its value is not published")
+        if not confirm(
+            f"{len(missing)} of the {len(FIELD_SOURCES)} fields do not exist in BookOrbit; "
+            f"publish the {len(usable)} that do?",
+            True,
+        ):
+            return FieldChoice((), missing)
+
+    checked: list[tuple[str, CustomField]] = []
+    for label, field in usable:
+        expected = next(kind for name, kind, _ in FIELD_SOURCES if name == label)
+        if field.label != label:
+            LOGGER.info(f"publishing {label!r} into BookOrbit's {field.label!r} field")
+        if field.type != expected:
+            LOGGER.warning(
+                f"BookOrbit field {field.label!r} is a {field.type} field, not {expected}; "
+                "sorting may not behave as expected"
+            )
+            if not confirm(f"Publish {label!r} into it anyway?", True):
+                continue
+        checked.append((label, field))
+    if not checked:
+        LOGGER.info("no BookOrbit fields left to publish to; nothing was written")
+    return FieldChoice(tuple(checked), missing)
+
+
+def publish_values(
+    pairs: Sequence[tuple[Path, Mapping[str, object]]],
+    client: BookOrbitClient,
+    fields: Sequence[tuple[str, CustomField]],
+    *,
+    dry_run: bool = False,
+) -> SyncSummary:
+    """Write each EPUB's values to the book it is paired with, sending only what differs.
+
+    The pairing is the caller's: a sync matches by path, a send by work ID,
+    because a file sent to replace a book keeps the book's name, not its own.
+    """
+
+    updated: list[str] = []
+    unchanged: list[str] = []
+    unreadable: list[str] = []
+    failed: list[tuple[str, str]] = []
+    streak = 0
+    interrupted = False
+    # One book is one request, so stopping between books always leaves a book
+    # either fully written or untouched, and the next run carries on.
+    try:
+        for checked, (epub_path, book) in enumerate(pairs, start=1):
+            if checked % PROGRESS_EVERY == 0:
+                LOGGER.info(f"  {checked}/{len(pairs)} checked, {len(updated)} updated")
+            name = epub_path.name
+            try:
+                wanted = epub_field_values(epub_path)
+            except EPUB_ERRORS:
+                unreadable.append(str(epub_path))
+                continue
+            changes = changed_values(wanted, book, fields)
+            if not changes:
+                unchanged.append(name)
+                continue
+            if dry_run:
+                updated.append(name)
+                continue
+            try:
+                client.set_custom_values(int(book["bookId"]), changes)  # type: ignore[arg-type]
+            except (BookOrbitError, KeyError, TypeError, ValueError) as error:
+                failed.append((name, str(error)))
+                streak += 1
+                if streak >= CONSECUTIVE_FAILURE_LIMIT:
+                    raise BookOrbitError(
+                        f"{streak} BookOrbit writes failed in a row; stopping. Last error: {error}"
+                    ) from error
+                continue
+            streak = 0
+            updated.append(name)
+    except KeyboardInterrupt:
+        interrupted = True
+        LOGGER.warning("stopped; rerun the same command to carry on from what is already published")
+
+    return SyncSummary(
+        configured=True,
+        updated=tuple(updated),
+        unchanged=tuple(unchanged),
+        unreadable=tuple(unreadable),
+        failed=tuple(failed),
+        interrupted=interrupted,
+    )
 
 
 def sync_epubs(
@@ -525,103 +744,21 @@ def sync_epubs(
         client = BookOrbitClient(config)
     resolved_library = library_id if library_id is not None else (client.config.library_id)
 
-    usable = resolve_fields(client.custom_fields())
-    filled = {label for label, _ in usable}
-    missing = tuple(label for label, _, _ in FIELD_SOURCES if label not in filled)
-    if not usable:
-        LOGGER.warning(
-            "BookOrbit has none of the expected custom fields yet; create them in "
-            "Settings -> Metadata -> Custom Metadata first"
-        )
-        return SyncSummary(configured=True, missing_fields=missing)
-    if missing:
-        for label in missing:
-            LOGGER.warning(f"BookOrbit has no custom field labelled {label!r}; its value is not published")
-        if not prompts.confirm(
-            f"{len(missing)} of the {len(FIELD_SOURCES)} fields do not exist in BookOrbit; "
-            f"publish the {len(usable)} that do?",
-            default=True,
-            assume_yes=assume_yes,
-        ):
-            return SyncSummary(configured=True, missing_fields=missing)
-
-    checked: list[tuple[str, CustomField]] = []
-    for label, field in usable:
-        expected = next(kind for name, kind, _ in FIELD_SOURCES if name == label)
-        if field.label != label:
-            LOGGER.info(f"publishing {label!r} into BookOrbit's {field.label!r} field")
-        if field.type != expected:
-            LOGGER.warning(
-                f"BookOrbit field {field.label!r} is a {field.type} field, not {expected}; "
-                "sorting may not behave as expected"
-            )
-            if not prompts.confirm(
-                f"Publish {label!r} into it anyway?", default=True, assume_yes=assume_yes
-            ):
-                continue
-        checked.append((label, field))
-    usable = tuple(checked)
-    if not usable:
-        LOGGER.info("no BookOrbit fields left to publish to; nothing was written")
-        return SyncSummary(configured=True, missing_fields=missing)
+    choice = choose_fields(client.custom_fields(), assume_yes=assume_yes)
+    if not choice.usable:
+        return SyncSummary(configured=True, missing_fields=choice.missing)
 
     books = client.library_books(resolved_library)
     index = index_by_path(books)
-    LOGGER.info(f"BookOrbit holds {len(books)} books; publishing {len(usable)} fields per book")
+    LOGGER.info(f"BookOrbit holds {len(books)} books; publishing {len(choice.usable)} fields per book")
 
-    updated: list[str] = []
-    unchanged: list[str] = []
+    pairs: list[tuple[Path, Mapping[str, object]]] = []
     unmatched: list[str] = []
-    unreadable: list[str] = []
-    failed: list[tuple[str, str]] = []
-    streak = 0
-    interrupted = False
-    # One book is one request, so stopping between books always leaves a book
-    # either fully written or untouched, and the next run carries on.
-    try:
-        for checked, epub_path in enumerate(epub_paths, start=1):
-            if checked % PROGRESS_EVERY == 0:
-                LOGGER.info(f"  {checked}/{len(epub_paths)} checked, {len(updated)} updated")
-            name = epub_path.name
-            try:
-                wanted = epub_field_values(epub_path)
-            except EPUB_ERRORS:
-                unreadable.append(str(epub_path))
-                continue
-            book = find_book(index, epub_path)
-            if book is None:
-                unmatched.append(str(epub_path))
-                continue
-            changes = changed_values(wanted, book, usable)
-            if not changes:
-                unchanged.append(name)
-                continue
-            if dry_run:
-                updated.append(name)
-                continue
-            try:
-                client.set_custom_values(int(book["bookId"]), changes)
-            except (BookOrbitError, KeyError, TypeError, ValueError) as error:
-                failed.append((name, str(error)))
-                streak += 1
-                if streak >= CONSECUTIVE_FAILURE_LIMIT:
-                    raise BookOrbitError(
-                        f"{streak} BookOrbit writes failed in a row; stopping. Last error: {error}"
-                    ) from error
-                continue
-            streak = 0
-            updated.append(name)
-    except KeyboardInterrupt:
-        interrupted = True
-        LOGGER.warning("stopped; rerun the same command to carry on from what is already published")
-
-    return SyncSummary(
-        configured=True,
-        updated=tuple(updated),
-        unchanged=tuple(unchanged),
-        unmatched=tuple(unmatched),
-        unreadable=tuple(unreadable),
-        missing_fields=missing,
-        failed=tuple(failed),
-        interrupted=interrupted,
-    )
+    for epub_path in epub_paths:
+        book = find_book(index, epub_path)
+        if book is None:
+            unmatched.append(str(epub_path))
+        else:
+            pairs.append((epub_path, book))
+    summary = publish_values(pairs, client, choice.usable, dry_run=dry_run)
+    return replace(summary, unmatched=tuple(unmatched), missing_fields=choice.missing)

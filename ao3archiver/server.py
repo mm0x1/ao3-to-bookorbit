@@ -14,10 +14,12 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 import io
+import logging
 import os
 from pathlib import Path, PurePosixPath
 import shlex
 import subprocess
+import sys
 from typing import Literal, Protocol
 
 from ao3archiver.common import ArchiverError
@@ -27,6 +29,7 @@ SERVER = "SERVER"
 SERVER_BOOKORBIT_DIR = "SERVER_BOOKORBIT_DIR"
 SERVER_LIBRARY_DIR = "SERVER_LIBRARY_DIR"
 BACKUP_DIR = "BACKUP_DIR"
+LIBRARY_IN_CONTAINER = "BOOKORBIT_LIBRARY_PATH_IN_CONTAINER"
 
 SSH_OPTIONS = ("-o", "BatchMode=yes", "-o", "ConnectTimeout=10")
 SSH_UNREACHABLE = 255
@@ -34,6 +37,10 @@ SSH_UNREACHABLE = 255
 # leave a file unreadable to the library's container; --delete is never wanted.
 RSYNC_BASE = ("rsync", "-rt", "--protect-args")
 FORBIDDEN_RSYNC_OPTIONS = ("-a", "--archive", "--delete", "--del", "--remove-source-files")
+RSYNC_SUMMARY_START = "Number of files:"
+# rsync's "some files vanished before they could be transferred": something
+# wrote while the copy ran. Everything else was copied.
+RSYNC_VANISHED = 24
 
 
 class ServerError(ArchiverError):
@@ -47,9 +54,9 @@ class Setting:
     key: str
     meaning: str
     example: str
-    # How the value is checked: an ssh alias, an absolute path on the server,
-    # or a folder on this PC (where ~ is expanded).
-    kind: Literal["alias", "server", "local"]
+    # How the value is checked: an ssh alias, an absolute path on the server
+    # or inside BookOrbit's container, or a folder on this PC (where ~ is expanded).
+    kind: Literal["alias", "server", "container", "local"]
 
 
 SETTINGS: tuple[Setting, ...] = (
@@ -65,6 +72,12 @@ SETTINGS: tuple[Setting, ...] = (
         "The folder on the server that send_to_server.py adds books to, inside SERVER_BOOKORBIT_DIR",
         "/path/to/bookorbit/fanfiction",
         "server",
+    ),
+    Setting(
+        LIBRARY_IN_CONTAINER,
+        "SERVER_LIBRARY_DIR as BookOrbit's container sees it, the start of the file paths BookOrbit reports",
+        "/books/fanfiction",
+        "container",
     ),
     Setting(BACKUP_DIR, "The folder on this PC the backup goes into", "~/Backups/bookorbit", "local"),
 )
@@ -96,6 +109,10 @@ class ServerSettings:
         return PurePosixPath(self.value(SERVER_LIBRARY_DIR))
 
     @property
+    def library_in_container(self) -> PurePosixPath:
+        return PurePosixPath(self.value(LIBRARY_IN_CONTAINER))
+
+    @property
     def backup_dir(self) -> Path:
         return Path(self.value(BACKUP_DIR))
 
@@ -124,11 +141,9 @@ def _normalise(setting: Setting, raw: str) -> str:
         if value.startswith("-") or any(character in value for character in " \t:/"):
             raise ServerError(f"{setting.key} must be an ssh alias such as {setting.example}, not {value!r}")
         return value
-    if setting.kind == "server":
+    if setting.kind in ("server", "container"):
         if not value.startswith("/"):
-            raise ServerError(
-                f"{setting.key} must be an absolute path on the server, such as {setting.example}, not {value!r}"
-            )
+            raise ServerError(f"{setting.key} must be an absolute path, such as {setting.example}, not {value!r}")
         return str(PurePosixPath(value))
     path = Path(value).expanduser()
     if not path.is_absolute():
@@ -163,11 +178,38 @@ def load_server_settings(
         )
 
     normalised = {key: _normalise(SETTINGS_BY_KEY[key], values[key]) for key in required}
+    if SERVER_LIBRARY_DIR in normalised and SERVER_BOOKORBIT_DIR in normalised:
+        # A book sent outside the backed-up folder would be a book with no backup.
+        if not PurePosixPath(normalised[SERVER_LIBRARY_DIR]).is_relative_to(normalised[SERVER_BOOKORBIT_DIR]):
+            raise ServerError(
+                f"{SERVER_LIBRARY_DIR} ({normalised[SERVER_LIBRARY_DIR]}) must be inside "
+                f"{SERVER_BOOKORBIT_DIR} ({normalised[SERVER_BOOKORBIT_DIR]}), so the backup covers what is sent"
+            )
     if from_environment:
         source = f"process environment ({', '.join(from_environment)}) over {dotenv_path}"
     else:
         source = str(dotenv_path)
     return ServerSettings(values=normalised, source=source)
+
+
+def library_relative(container_path: str, settings: ServerSettings) -> PurePosixPath:
+    """Where a file BookOrbit reports sits, relative to the library folder.
+
+    BookOrbit reports paths inside its container (``/books/fanfiction/1.epub``),
+    and the server knows the same file by another root; the explicit
+    ``BOOKORBIT_LIBRARY_PATH_IN_CONTAINER`` is what joins the two.
+    """
+
+    path = PurePosixPath(container_path)
+    if not path.is_relative_to(settings.library_in_container) or path == settings.library_in_container:
+        raise ServerError(f"{container_path} is not inside {LIBRARY_IN_CONTAINER} ({settings.library_in_container})")
+    return path.relative_to(settings.library_in_container)
+
+
+def host_path(container_path: str, settings: ServerSettings) -> PurePosixPath:
+    """The server's own path for a file BookOrbit reports."""
+
+    return settings.library_dir / library_relative(container_path, settings)
 
 
 # --- running commands ----------------------------------------------------------
@@ -242,6 +284,64 @@ def remote_dir_exists(server: str, path: PurePosixPath, runner: Runner) -> bool:
     raise ServerError(
         f"Checking for {path} on {server} failed (exit {result.returncode})" + (f":\n{detail}" if detail else "")
     )
+
+
+def rsync_summary(output: str) -> list[str]:
+    """rsync's ``--stats`` block, from its first line to the end."""
+
+    lines = output.replace("\r", "\n").splitlines()
+    for index, line in enumerate(lines):
+        if line.startswith(RSYNC_SUMMARY_START):
+            return [line.strip() for line in lines[index:] if line.strip()]
+    return []
+
+
+class ProgressEcho:
+    """Show rsync's progress on the terminal; its summary goes to the run log instead.
+
+    The progress redraws itself many times a second, which would bury a log
+    file, and the summary would appear twice if it were echoed as well as
+    logged.
+    """
+
+    def __init__(self) -> None:
+        self.in_summary = False
+        self.mid_line = False
+
+    def __call__(self, line: str) -> None:
+        if line.startswith(RSYNC_SUMMARY_START):
+            self.in_summary = True
+        if self.in_summary:
+            return
+        sys.stdout.write(line)
+        sys.stdout.flush()
+        self.mid_line = line.endswith("\r")
+
+    def finish(self) -> None:
+        """End a progress line left open, so the next log line starts clean."""
+
+        if self.mid_line:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+            self.mid_line = False
+
+
+def transfer(command: Sequence[str], runner: Runner, logger: logging.Logger) -> RunResult:
+    """Run an rsync copy with its progress on the terminal and its summary in the log."""
+
+    echo = ProgressEcho()
+    result = runner(command, echo=echo)
+    echo.finish()
+    summary = rsync_summary(result.output)
+    if summary:
+        logger.info("rsync summary:")
+        for line in summary:
+            logger.info(f"  {line}")
+    if result.returncode == RSYNC_VANISHED:
+        logger.warning("some files changed while they were being copied; the next run picks them up")
+    elif result.returncode != 0:
+        raise ServerError(f"rsync stopped with exit code {result.returncode}:\n{last_lines(result.output)}")
+    return result
 
 
 def remote(server: str, path: PurePosixPath) -> str:
