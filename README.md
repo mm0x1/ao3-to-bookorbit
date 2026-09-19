@@ -65,7 +65,7 @@ server; you empty `downloaded/` yourself.
 18:19:41    to download                32310
 18:19:41    to check for new chapters  180
 18:19:41    to enrich only             0
-18:19:41    output folder              /path/to/ao3-to-calibre/downloaded
+18:19:41    output folder              /path/to/ao3-to-bookorbit/downloaded
 18:19:41    delay                      10s between requests
 18:19:41    estimated finish           7d12h (about 2026-09-25 07:02)
 18:19:41    failure log                ~/.local/share/ao3-calibre-backfill/download-failures.jsonl
@@ -85,7 +85,7 @@ asked anything: each question takes its default and the run starts.
 `ssh` for the server commands:
 
 ```sh
-git clone https://github.com/mm0x1/ao3-to-calibre.git && cd ao3-to-calibre
+git clone https://github.com/mm0x1/ao3-to-bookorbit.git && cd ao3-to-bookorbit
 python3 -m venv venv && source venv/bin/activate   # optional
 pip install -r requirements.txt
 cp .env.example .env        # then fill it in: see docs/CONFIGURATION.md
@@ -103,8 +103,8 @@ ao3Archiver
   sends them to your library server, and backs that server up.
 
 Setup
-  [ok]  .env             /path/to/ao3-to-calibre/.env
-  [ok]  AO3 credentials  from /path/to/ao3-to-calibre/.env
+  [ok]  .env             /path/to/ao3-to-bookorbit/.env
+  [ok]  AO3 credentials  from /path/to/ao3-to-bookorbit/.env
   [ok]  BookOrbit        http://myserver:8080/api/v1
   [ok]  Server settings  myserver:/path/to/bookorbit/fanfiction
   [ok]  links/           35 works in 1 file(s)

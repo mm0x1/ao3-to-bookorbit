@@ -24,7 +24,7 @@ Everything comes from `.env`, which only you edit; see
 setting stops before it touches anything and prints the exact lines to add:
 
 ```text
-ERROR  backup_server.py needs settings that are not in /path/to/ao3-to-calibre/.env. It never writes that file; add these lines to it yourself:
+ERROR  backup_server.py needs settings that are not in /path/to/ao3-to-bookorbit/.env. It never writes that file; add these lines to it yourself:
 
     # The folder on this PC that holds the backup, which goes into a folder in it named like SERVER_BOOKORBIT_DIR's own, for example: ~/Backups
     BACKUP_DIR=
@@ -120,7 +120,7 @@ Back up the server
   SERVER                myserver
   SERVER_BOOKORBIT_DIR  /path/to/bookorbit
   BACKUP_DIR            /home/me/Backups
-  settings from         /path/to/ao3-to-calibre/.env
+  settings from         /path/to/ao3-to-bookorbit/.env
   backup goes into      /home/me/Backups/bookorbit
   command               rsync -rt --protect-args --stats --info=progress2 myserver:/path/to/bookorbit /home/me/Backups/
 ========================================================================

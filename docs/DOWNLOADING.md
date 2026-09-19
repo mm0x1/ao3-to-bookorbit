@@ -54,7 +54,7 @@ Plan
   to download                32310
   to check for new chapters  180
   to enrich only             0
-  output folder              /path/to/ao3-to-calibre/downloaded
+  output folder              /path/to/ao3-to-bookorbit/downloaded
   delay                      10s between requests
   estimated finish           7d12h (about 2026-09-25 07:02)
   failure log                ~/.local/share/ao3-calibre-backfill/download-failures.jsonl

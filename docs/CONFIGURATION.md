@@ -90,7 +90,7 @@ Whichever wins, every run logs *which source* supplied the pair — never the
 values:
 
 ```text
-using credentials from /path/to/ao3-to-calibre/.env
+using credentials from /path/to/ao3-to-bookorbit/.env
 ```
 
 `python3 start_here.py` prints the same thing as a setup check.

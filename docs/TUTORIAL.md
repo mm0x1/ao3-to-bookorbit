@@ -16,7 +16,7 @@ and asks before it does it.
 ## Before you start
 
 ```sh
-git clone https://github.com/mm0x1/ao3-to-calibre.git && cd ao3-to-calibre
+git clone https://github.com/mm0x1/ao3-to-bookorbit.git && cd ao3-to-bookorbit
 python3 -m venv venv && source venv/bin/activate   # optional
 pip install -r requirements.txt
 cp .env.example .env
