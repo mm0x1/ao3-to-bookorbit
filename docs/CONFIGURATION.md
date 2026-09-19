@@ -10,7 +10,7 @@ directory where logs, caches and backups live.
 4. [Environment variables](#environment-variables)
 5. [The SSH alias](#the-ssh-alias)
 6. [Files outside the repository](#files-outside-the-repository)
-7. [Confirmations and --yes](#confirmations-and---yes)
+7. [Questions, and running unattended](#questions-and-running-unattended)
 
 ## .env
 
@@ -149,27 +149,20 @@ put it somewhere else.
 with `.env` and `*.log`. So is `personal.ini`, which is no longer read, so that
 an old one holding a password can never be committed by accident.
 
-## Confirmations and `--yes`
+## Questions, and running unattended
 
-Some commands ask a question before they start. Three rules hold everywhere:
+Every command that can change something asks first. Two rules hold everywhere:
 
-1. **A question is asked only at a terminal.** Under `nohup`, cron, a pipe or
-   CI, the documented default is taken and the decision is logged instead, so a
-   run that is meant to survive for days never blocks on a prompt nobody can see.
-2. **It is asked before work starts**, never inside a loop.
-3. **`--yes` answers it in advance**, on every command that can ask.
+1. **A question is asked only before work starts**, never once per book.
+2. **Nobody is ever asked a question they cannot see.** What happens off a
+   terminal — under `nohup`, cron or a pipe — depends on the command:
 
-The `--approve-…` flags are unchanged and remain authoritative: a prompt is an
-alternative to a flag for someone sitting at a terminal, never a new gate a
-script has to satisfy. Two exceptions worth knowing:
-
-- `repair-epubs` off a terminal still requires `--approve-epub-write`, as it
-  always has.
-- `bookorbit-sync` writes to a server, and off a terminal requires `--yes`.
-  `--dry-run` needs nothing.
-- `send_to_server.py` and `backup_server.py` take no flags at all, so their
-  questions are the only way to say yes. Off a terminal they refuse to start
-  and say why.
+| Command | Off a terminal |
+| --- | --- |
+| `download_fics.py` | Takes each question's default, logs it, and starts, so a run meant to last days never blocks. `--yes` does the same at a terminal. The defaults never download a finished work you already own. |
+| `send_to_server.py`, `backup_server.py` | Refuse to start and say why. They take no flags, so their questions are the only way to say yes, and a yes to changing the server is never assumed. |
+| `start_here.py` | Lists what the project does and exits. |
+| The retired backfill | Keeps its `--approve-…` flags, which stay authoritative; `--yes` answers its questions in advance, and `--dry-run` needs nothing. |
 
 ---
 

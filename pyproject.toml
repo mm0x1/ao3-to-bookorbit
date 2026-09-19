@@ -1,7 +1,7 @@
 [project]
 name = "ao3archiver"
-version = "1.0.0"
-description = "Download Archive of Our Own works as EPUBs with their AO3 statistics baked in for Calibre."
+version = "2.0.0"
+description = "Download Archive of Our Own works as EPUBs with their AO3 statistics baked in, send them to a BookOrbit server, and back it up."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"

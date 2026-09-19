@@ -1,11 +1,12 @@
-"""Download AO3 works and bake their metadata into each EPUB for Calibre.
+"""Download AO3 works and bake their metadata into each EPUB.
 
 Given a directory of link files (as produced by ``ao3downloader``), this
 fetches each work page, downloads the EPUB it links to, calculates the local
 Words/Gfog metrics from the file, and writes everything into the EPUB: an
 ``ao3`` identifier, a visible statistics block, portable ``ao3:*`` metadata,
-and Calibre ``calibre:user_metadata`` values. Dragging the files into Calibre
-then fills the custom columns with no separate sync step.
+and Calibre ``calibre:user_metadata`` values. ``send_to_server.py`` reads the
+portable values to fill BookOrbit's fields; Calibre, if anyone drags the files
+into it, fills its custom columns from the others.
 
 Before anything is requested, the plan asks BookOrbit what is already on the
 server, by AO3 work ID: a work already there is downloaded again only when it

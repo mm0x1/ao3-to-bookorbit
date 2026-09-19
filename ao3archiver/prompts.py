@@ -5,16 +5,14 @@ so a question that blocks would hang exactly the run it is meant to guard.
 Every question asked through this module therefore:
 
 1. **is asked only at a terminal.** Off one - under ``nohup``, cron, a pipe, or
-   CI - the documented default is taken and the decision is logged instead.
+   CI - the documented default is taken and the decision is logged instead, so
+   a default must always be the safe answer.
 2. **is asked before work starts**, never inside a loop over books or works.
-3. **is answered in advance by** ``--yes``.
-
-The ``--approve-*`` flags stay authoritative. A prompt is an alternative to a
-flag for someone sitting at a terminal, never a new gate a script must satisfy.
 
 The commands that change the server have no flags at all: their questions are
 the only way to say yes, so off a terminal they refuse to start instead
-(:func:`require_terminal`).
+(:func:`require_terminal`). ``assume_yes`` serves the retired backfill's
+``--yes``, whose ``--approve-*`` flags stay authoritative.
 """
 
 from __future__ import annotations
