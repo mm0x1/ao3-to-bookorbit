@@ -26,7 +26,7 @@ setting stops before it touches anything and prints the exact lines to add:
 ```text
 ERROR  backup_server.py needs settings that are not in /path/to/ao3-to-calibre/.env. It never writes that file; add these lines to it yourself:
 
-    # The folder on this PC the backup goes into, for example: ~/Backups/bookorbit
+    # The folder on this PC that holds the backup, which goes into a folder in it named like SERVER_BOOKORBIT_DIR's own, for example: ~/Backups
     BACKUP_DIR=
 ```
 
@@ -119,18 +119,21 @@ python3 backup_server.py
 Back up the server
   SERVER                myserver
   SERVER_BOOKORBIT_DIR  /path/to/bookorbit
-  BACKUP_DIR            /home/me/Backups/bookorbit
+  BACKUP_DIR            /home/me/Backups
   settings from         /path/to/ao3-to-calibre/.env
-  command               rsync -rt --protect-args --stats --info=progress2 myserver:/path/to/bookorbit/ /home/me/Backups/bookorbit/
+  backup goes into      /home/me/Backups/bookorbit
+  command               rsync -rt --protect-args --stats --info=progress2 myserver:/path/to/bookorbit /home/me/Backups/
 ========================================================================
 checking that /path/to/bookorbit exists on myserver
 Start the backup now? [Y/n]
 ```
 
-That is the whole backup: one `rsync` pull of everything under
-`SERVER_BOOKORBIT_DIR` into `BACKUP_DIR`. There is no archive, no database dump
-and no copying onward — taking the backup to an external drive or a cloud folder
-is up to you.
+That is the whole backup: one `rsync` pull of `SERVER_BOOKORBIT_DIR`, folder and
+all, into `BACKUP_DIR`. The copy is a folder named like the server's —
+`/path/to/bookorbit` becomes `BACKUP_DIR/bookorbit` — holding every folder the
+server's does, so nothing lands loose in `BACKUP_DIR`. There is no archive, no
+database dump and no copying onward — taking the backup to an external drive or
+a cloud folder is up to you.
 
 - **The first run copies everything**, which for a large library is many
   gigabytes and can take hours. Later runs copy only what changed. Nothing puts

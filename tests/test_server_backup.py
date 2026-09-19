@@ -65,8 +65,8 @@ class BackupTest(unittest.TestCase):
 
         self.assertEqual(fake.rsync_calls, [[
             "rsync", "-rt", "--protect-args", "--stats", "--info=progress2",
-            "myserver:/srv/bookorbit/", f"{self.backup}/",
-        ]])
+            "myserver:/srv/bookorbit", f"{self.backup}/",
+        ]], "no slash after the source: the folder itself is copied, not just its contents")
 
     def test_answering_no_copies_nothing(self):
         self.backup.mkdir()
@@ -83,8 +83,9 @@ class BackupTest(unittest.TestCase):
 
         self.assertIn("SERVER_BOOKORBIT_DIR", self.output)
         self.assertIn("/srv/bookorbit", self.output)
-        self.assertIn(f"rsync -rt --protect-args --stats --info=progress2 myserver:/srv/bookorbit/ {self.backup}/",
+        self.assertIn(f"rsync -rt --protect-args --stats --info=progress2 myserver:/srv/bookorbit {self.backup}/",
                       self.output)
+        self.assertRegex(self.output, rf"backup goes into\s+{self.backup}/bookorbit\n")
 
     def test_a_folder_missing_on_the_server_is_refused(self):
         self.backup.mkdir()
@@ -96,6 +97,15 @@ class BackupTest(unittest.TestCase):
         self.assertIn("SERVER_BOOKORBIT_DIR", str(caught.exception))
         self.assertEqual(fake.rsync_calls, [])
         self.assertEqual(self.answers.questions, [], "nothing is asked about a backup that cannot run")
+
+    def test_the_servers_root_is_refused_since_it_names_no_folder(self):
+        self.dotenv.write_text(f"SERVER=myserver\nSERVER_BOOKORBIT_DIR=/\nBACKUP_DIR={self.backup}\n", encoding="utf-8")
+        fake = FakeServer(folders=["/"])
+
+        with self.assertRaises(server.ServerError):
+            self.main(fake, "y")
+
+        self.assertEqual(fake.calls, [])
 
     def test_an_unreachable_server_is_a_clear_error(self):
         self.backup.mkdir()
@@ -170,7 +180,7 @@ class BackupTest(unittest.TestCase):
 class RealRsyncTest(unittest.TestCase):
     """The real rsync, through a stand-in ssh, into folders with spaces in their names."""
 
-    def test_the_folder_is_mirrored_and_nothing_already_backed_up_is_removed(self):
+    def test_the_folder_lands_whole_in_the_backup_and_nothing_there_is_removed(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "server side" / "book orbit"
@@ -198,8 +208,10 @@ class RealRsyncTest(unittest.TestCase):
                 )
             close_run_logs()
 
-            copied = backup / "fan fic" / "111.epub"
+            copied = backup / "book orbit" / "fan fic" / "111.epub"
             self.assertEqual(exit_code, 0)
+            self.assertEqual(sorted(path.name for path in backup.iterdir()), ["book orbit", "only in the backup.epub"],
+                             "the server's folders stay inside a folder named like the server's")
             self.assertEqual(copied.read_bytes(), b"epub bytes")
             self.assertEqual(copied.stat().st_mtime, 1_600_000_000, "-t keeps the time")
             self.assertEqual((backup / "only in the backup.epub").read_bytes(), b"kept")

@@ -79,7 +79,13 @@ SETTINGS: tuple[Setting, ...] = (
         "/books/fanfiction",
         "container",
     ),
-    Setting(BACKUP_DIR, "The folder on this PC the backup goes into", "~/Backups/bookorbit", "local"),
+    Setting(
+        BACKUP_DIR,
+        "The folder on this PC that holds the backup, which goes into a folder in it named like "
+        "SERVER_BOOKORBIT_DIR's own",
+        "~/Backups",
+        "local",
+    ),
 )
 SETTINGS_BY_KEY = {setting.key: setting for setting in SETTINGS}
 ALL_KEYS = tuple(setting.key for setting in SETTINGS)

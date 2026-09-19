@@ -1,7 +1,8 @@
 """Back up the server's BookOrbit folder to this PC: one rsync pull and nothing else.
 
-Every file under ``SERVER_BOOKORBIT_DIR`` is copied into ``BACKUP_DIR``, and
-nothing is deleted on either side. There is no archive, no database dump and no
+``SERVER_BOOKORBIT_DIR`` is copied, folder and all, into ``BACKUP_DIR``: a
+server folder ``/srv/bookorbit`` becomes ``BACKUP_DIR/bookorbit``. Nothing is
+deleted on either side. There is no archive, no database dump and no
 copying onward: taking the backup to a drive or a cloud folder is left to the
 person, on purpose.
 
@@ -42,11 +43,18 @@ COMMAND = "backup_server.py"
 REQUIRED = (SERVER, SERVER_BOOKORBIT_DIR, BACKUP_DIR)
 
 
+def backup_folder(settings: ServerSettings) -> Path:
+    """Where the copy lands: a folder in ``BACKUP_DIR`` named like the server's."""
+
+    return settings.backup_dir / settings.bookorbit_dir.name
+
+
 def backup_command(settings: ServerSettings) -> list[str]:
-    """The one pull. The trailing slashes copy the folder's contents, not the folder."""
+    """The one pull. No slash after the source, so rsync copies the folder itself, not
+    just what is in it: its contents never spill loose into ``BACKUP_DIR``."""
 
     return rsync_command(
-        f"{remote(settings.server, settings.bookorbit_dir)}/",
+        remote(settings.server, settings.bookorbit_dir),
         f"{settings.backup_dir}/",
         "--stats",
         "--info=progress2",
@@ -79,8 +87,14 @@ def main(
 
     settings = load_server_settings(REQUIRED, environ, dotenv_path=dotenv_path, command=COMMAND)
     source, destination = settings.bookorbit_dir, settings.backup_dir
+    if not source.name:
+        raise ServerError(f"{SERVER_BOOKORBIT_DIR} must name a folder, not the server's root")
     command = backup_command(settings)
-    log_banner(LOGGER, "Back up the server", [*settings.rows(), ("command", shlex.join(command))])
+    log_banner(LOGGER, "Back up the server", [
+        *settings.rows(),
+        ("backup goes into", backup_folder(settings)),
+        ("command", shlex.join(command)),
+    ])
 
     LOGGER.info(f"checking that {source} exists on {settings.server}")
     if not remote_dir_exists(settings.server, source, runner):
@@ -108,7 +122,7 @@ def main(
 
     LOGGER.info("copying; the first backup copies everything and can take hours")
     transfer(command, runner, LOGGER)
-    LOGGER.info(f"backup complete: {destination}")
+    LOGGER.info(f"backup complete: {backup_folder(settings)}")
     return 0
 
 
