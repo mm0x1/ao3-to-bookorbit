@@ -854,6 +854,7 @@ class RepairEpubsTest(unittest.TestCase):
                 "--library", str(self.library),
                 "--epub-backup-dir", str(self.backups),
                 "--cache-dir", str(self.library.parent / "cache"),
+                "--log-dir", str(self.library.parent / "logs"),
             ])
 
         self.assertIn("--approve-epub-write", str(caught.exception))

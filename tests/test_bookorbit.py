@@ -141,7 +141,8 @@ class NotConfiguredTest(unittest.TestCase):
             original = bookorbit.load_bookorbit_config
             bookorbit.load_bookorbit_config = lambda *args, **kwargs: None
             try:
-                exit_code = backfill.main(["bookorbit-sync", "--library", str(library), "--yes"])
+                exit_code = backfill.main(["bookorbit-sync", "--library", str(library), "--yes",
+                                           "--log-dir", str(Path(directory) / "logs")])
             finally:
                 bookorbit.load_bookorbit_config = original
 
@@ -171,7 +172,7 @@ class NotConfiguredTest(unittest.TestCase):
             write_epub(library / "work.epub")
 
             with self.assertRaises(backfill.BackfillError):
-                backfill.main(["bookorbit-sync", "--library", str(library)])
+                backfill.main(["bookorbit-sync", "--library", str(library), "--log-dir", str(Path(directory) / "logs")])
 
     def test_a_dry_run_needs_no_approval_at_all(self):
         original = bookorbit.load_bookorbit_config
@@ -182,7 +183,8 @@ class NotConfiguredTest(unittest.TestCase):
                 library.mkdir()
                 write_epub(library / "work.epub")
 
-                exit_code = backfill.main(["bookorbit-sync", "--library", str(library), "--dry-run"])
+                exit_code = backfill.main(["bookorbit-sync", "--library", str(library), "--dry-run",
+                                           "--log-dir", str(Path(directory) / "logs")])
         finally:
             bookorbit.load_bookorbit_config = original
 

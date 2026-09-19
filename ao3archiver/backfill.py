@@ -1594,7 +1594,6 @@ def _portable_metadata_for_record(
 
 
 EPUB_PASS_PROGRESS_EVERY = 1000
-AO3_COLUMN_LABELS = tuple(label for label, _, _, _ in AO3_COLUMNS)
 
 
 def _stale_ao3_columns(
