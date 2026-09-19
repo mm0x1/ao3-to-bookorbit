@@ -1303,6 +1303,18 @@ class FetchWorkPageTest(unittest.TestCase):
 
         self.assertEqual(client.session.headers["User-Agent"], ao3_client.USER_AGENT)
 
+    def test_signing_in_keeps_the_same_name(self):
+        """The login used to switch every later request to the backfill's old name."""
+
+        session = RoutedSession()
+        sign_in_replies(session)
+        client, _ = make_client(session)
+
+        client.sign_in()
+
+        self.assertEqual(client.session.headers["User-Agent"], ao3_client.USER_AGENT)
+        self.assertIn("ao3-to-bookorbit", ao3_client.USER_AGENT)
+
 
 class DownloadEpubTest(unittest.TestCase):
     URL = "https://archiveofourown.org/downloads/111/Example.epub"

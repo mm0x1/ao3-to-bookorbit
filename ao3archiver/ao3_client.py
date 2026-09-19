@@ -107,7 +107,8 @@ AO3_BASE_URL = "https://archiveofourown.org"
 DOWNLOAD_HOSTS = AO3_HOSTS | frozenset({"download.archiveofourown.org"})
 
 
-USER_AGENT = "ao3Archiver-download/1.0 (sequential work downloads)"
+# One name for every request, with a link so AO3 can see what is asking.
+USER_AGENT = "ao3-to-bookorbit/2.0 (+https://github.com/mm0x1/ao3-to-bookorbit)"
 
 
 # The lock file name predates the downloader; keeping it means a backfill
@@ -838,7 +839,7 @@ def _login_once(
     """One complete login attempt: fetch a token, submit it, confirm the session."""
 
     session.headers.update({
-        "User-Agent": "ao3-calibre-backfill/1.0 (sequential metadata refresh)",
+        "User-Agent": USER_AGENT,
         "Accept": "text/html,application/xhtml+xml",
     })
     schedule_request = before_request or (lambda: None)
@@ -1046,7 +1047,7 @@ class AO3Fetcher:
         self._last_request_at: float | None = None
         self.last_request_wall_time: float | None = None
         self.session.headers.update({
-            "User-Agent": "ao3-calibre-backfill/1.0 (sequential metadata refresh)",
+            "User-Agent": USER_AGENT,
             "Accept": "text/html,application/xhtml+xml",
         })
 
@@ -1389,8 +1390,6 @@ class AO3DownloadClient:
             reauthenticate=self.sign_in if credentials is not None else None,
             retry_unexpected_once=True,
         )
-        # AO3Fetcher sets the backfill's User-Agent; downloads identify themselves.
-        self.session.headers["User-Agent"] = USER_AGENT
 
     def close(self) -> None:
         self.session.close()
