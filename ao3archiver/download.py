@@ -341,6 +341,13 @@ def split_owned(planned: Sequence[PlannedWork], owned: OwnedLibrary | None) -> O
     complete: list[PlannedWork] = []
     unknown: list[PlannedWork] = []
     for item in planned:
+        if item.action == "download" and item.target.work_id in owned.ambiguous:
+            # Owned twice over: which copy's chapter count counts is unclear, so
+            # it is only downloaded again on request, like a work with no count.
+            books = ", ".join(str(book_id) for book_id in owned.ambiguous[item.target.work_id])
+            LOGGER.warning(f"work {item.target.work_id} is in BookOrbit more than once (books {books})")
+            unknown.append(item)
+            continue
         work = owned.works.get(item.target.work_id) if item.action == "download" else None
         if work is None:
             kept.append(item)

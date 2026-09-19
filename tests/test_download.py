@@ -610,6 +610,21 @@ class SplitOwnedTest(unittest.TestCase):
         self.assertEqual([item.target.work_id for item in split.complete], ["4"])
         self.assertEqual([item.target.work_id for item in split.unknown], ["5"])
 
+    def test_a_work_bookorbit_holds_twice_is_owned_not_new(self):
+        rows = [
+            {"bookId": 1, "filePaths": ["/books/fanfiction/2.epub"], "custom.ao3_chapters": "3/?"},
+            {"bookId": 2, "filePaths": ["/books/fanfiction/Old/Copy (2)/Copy.epub"],
+             "custom.ao3_link": "https://archiveofourown.org/works/2", "custom.ao3_chapters": "3/?"},
+        ]
+        fields = [bookorbit.CustomField(7, "AO3 Link", "url", "ao3_link"),
+                  bookorbit.CustomField(8, "AO3 Chapters", "text", "ao3_chapters")]
+
+        split = download.split_owned(self.planned("2"), bookorbit.owned_from_rows(rows, fields))
+
+        self.assertEqual(split.kept, ())
+        self.assertEqual([item.target.work_id for item in split.unknown], ["2"],
+                         "which copy's chapter count counts is unclear, so it is asked about with the uncounted ones")
+
     def test_a_file_already_in_downloaded_is_not_looked_up(self):
         split = download.split_owned(self.planned("2", action="enrich"), owned_library(**{"2": "12/12"}))
 

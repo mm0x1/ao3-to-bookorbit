@@ -96,6 +96,9 @@ their own, run it, and answer yes.
   to AO3, rather than download works you may already own.
 - A book BookOrbit holds but cannot tell the work of — neither an AO3 Link value
   nor a `<work id>.epub` file name — is not recognised, so its work counts as new.
+- A work BookOrbit holds as two books is still owned: it is named in a warning
+  and counted with the works that have no chapter count, since which copy's
+  count to trust is unclear.
 
 ## Leaving it running
 
