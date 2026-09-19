@@ -130,10 +130,12 @@ python3 backup_server.py
 ```
 
 One rsync pull of `SERVER_BOOKORBIT_DIR` into a folder of the same name in
-`BACKUP_DIR`: `/path/to/bookorbit` becomes `BACKUP_DIR/bookorbit`.
-The first run copies the whole library and can take hours; later runs copy only
-what changed. It deletes nothing on either side, and makes no archive: taking
-the backup on to a drive or a cloud folder is up to you.
+`BACKUP_DIR` — `/path/to/bookorbit` becomes `BACKUP_DIR/bookorbit` — then a zip
+of that folder beside it, `bookorbit-<date>T<time>.zip`. The first run copies the
+whole library and can take hours; later runs copy only what changed. Every zip
+is kept, about the library's size each, so purge old ones yourself. Nothing is
+deleted on either side, and taking the zips on to a drive or a cloud folder is
+up to you.
 [docs/SERVER.md](SERVER.md#backing-up) has the details.
 
 ## Without a server: Calibre

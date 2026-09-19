@@ -122,18 +122,37 @@ Back up the server
   BACKUP_DIR            /home/me/Backups
   settings from         /path/to/ao3-to-bookorbit/.env
   backup goes into      /home/me/Backups/bookorbit
+  then zipped to        /home/me/Backups/bookorbit-20260919T141205.zip
   command               rsync -rt --protect-args --stats --info=progress2 myserver:/path/to/bookorbit /home/me/Backups/
 ========================================================================
 checking that /path/to/bookorbit exists on myserver
 Start the backup now? [Y/n]
 ```
 
-That is the whole backup: one `rsync` pull of `SERVER_BOOKORBIT_DIR`, folder and
-all, into `BACKUP_DIR`. The copy is a folder named like the server's —
-`/path/to/bookorbit` becomes `BACKUP_DIR/bookorbit` — holding every folder the
-server's does, so nothing lands loose in `BACKUP_DIR`. There is no archive, no
-database dump and no copying onward — taking the backup to an external drive or
-a cloud folder is up to you.
+The backup is two steps, both every time:
+
+1. **One `rsync` pull** of `SERVER_BOOKORBIT_DIR`, folder and all, into
+   `BACKUP_DIR`. The copy is a folder named like the server's —
+   `/path/to/bookorbit` becomes `BACKUP_DIR/bookorbit` — holding every folder
+   the server's does, so nothing lands loose in `BACKUP_DIR`.
+2. **A zip of that folder**, `BACKUP_DIR/bookorbit-<date>T<time>.zip`, beside it.
+   Unzipping it recreates the `bookorbit/` folder as it was at that moment.
+
+```text
+backup folder complete: /home/me/Backups/bookorbit
+zipping it into /home/me/Backups/bookorbit-20260919T141205.zip
+checking every file in the zip
+zip complete: /home/me/Backups/bookorbit-20260919T141205.zip (29667 files, 22377 folders, 5.15 GB)
+```
+
+**Every zip is kept.** None is ever replaced or deleted, so they pile up at
+about the library's size each: purge old ones yourself as space needs. That is
+what makes the backup a history rather than a mirror — a file that is replaced,
+or damaged, on the server replaces the folder's copy on the next run, but never
+an earlier zip's.
+
+There is no database dump and no copying onward — taking the zips to an
+external drive or a cloud folder is up to you.
 
 - **The first run copies everything**, which for a large library is many
   gigabytes and can take hours. Later runs copy only what changed. Nothing puts
@@ -146,18 +165,22 @@ a cloud folder is up to you.
   first run.
 - **If `SERVER_BOOKORBIT_DIR` does not exist on the server**, or the server
   cannot be reached, it says so and copies nothing.
-- **Stopping it with Ctrl-C is safe.** The server is only ever read from, and
-  the next run carries on from what was already copied.
-
-One consequence of a plain mirror is worth knowing: a file that is replaced — or
-damaged — on the server replaces the backup's copy on the next run. Keep an
-older copy elsewhere if that matters to you.
+- **The zip is stored, not compressed.** EPUBs, PDFs and comic archives are
+  compressed already, so it is barely bigger and many times faster to write.
+- **A zip that exists is a whole one.** It is written under a temporary name and
+  renamed only after every file in it passes a CRC check. Before writing, the
+  command checks there is room for it; without room, it stops with the folder
+  backup complete and says so.
+- **Stopping it with Ctrl-C is safe.** The server is only ever read from, an
+  unfinished zip is not kept, and the next run carries on from what was already
+  copied.
 
 ## What they never do
 
 - **Delete anything**, on the server or on this PC. rsync runs with `-rt` (names
   and modification times) and never with `-a` or any `--delete`; a file that is
-  gone from the server stays in the backup, and a file sent stays in
+  gone from the server stays in the backup, no zip is ever removed, and a file
+  sent stays in
   `downloaded/`.
 - **Copy permissions or owners.** exFAT cannot hold them, and on another file
   system they could leave a book unreadable to BookOrbit's container.

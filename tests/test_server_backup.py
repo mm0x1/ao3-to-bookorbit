@@ -1,6 +1,7 @@
 """Tests for backup_server.py: one rsync pull, asked for at a terminal and never anywhere else."""
 
 from contextlib import redirect_stdout
+from datetime import datetime
 import io
 import os
 from pathlib import Path
@@ -8,6 +9,7 @@ import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
+import zipfile
 
 from ao3archiver import server, server_backup
 from ao3archiver.common import ArchiverError
@@ -30,7 +32,9 @@ class BackupTest(unittest.TestCase):
         close_run_logs()
         self._directory.cleanup()
 
-    def main(self, runner, *answers, terminal=True):
+    STARTED = datetime(2026, 9, 19, 14, 12, 5)
+
+    def main(self, runner, *answers, terminal=True, disk_free=lambda path: 10**12):
         self.answers = Answers(*answers)
         with redirect_stdout(io.StringIO()) as stream:
             try:
@@ -42,6 +46,8 @@ class BackupTest(unittest.TestCase):
                     input_fn=self.answers,
                     terminal_fn=lambda: terminal,
                     log_dir=self.root / "logs",
+                    now_fn=lambda: self.STARTED,
+                    disk_free=disk_free,
                 )
             finally:
                 self.output = stream.getvalue()
@@ -174,6 +180,69 @@ class BackupTest(unittest.TestCase):
         self.backup.mkdir()
 
         self.assertEqual(self.main(FakeServer(folders=["/srv/bookorbit"], rsync_exit=24), "y"), 0)
+        self.assertTrue((self.backup / "bookorbit-20260919T141205.zip").is_file(), "and the backup is still zipped")
+
+    def zips(self):
+        return sorted(path.name for path in self.backup.glob("*.zip"))
+
+    def test_every_backup_is_zipped_beside_the_folder_with_the_folder_inside(self):
+        self.backup.mkdir()
+
+        self.main(FakeServer(folders=["/srv/bookorbit"]), "y")
+
+        self.assertEqual(self.zips(), ["bookorbit-20260919T141205.zip"])
+        with zipfile.ZipFile(self.backup / "bookorbit-20260919T141205.zip") as archive:
+            names = archive.namelist()
+            self.assertEqual(archive.read("bookorbit/fanfiction/111.epub"), b"epub bytes")
+            self.assertEqual({info.compress_type for info in archive.infolist()}, {zipfile.ZIP_STORED})
+        self.assertIn("bookorbit/comics/", names, "an empty folder is kept too")
+        self.assertTrue(all(name.startswith("bookorbit/") for name in names), "unzipping recreates the folder")
+        self.assertEqual(list(self.backup.glob(".*.tmp")), [])
+        self.assertIn("then zipped to", self.output)
+
+    def test_every_zip_is_kept_and_none_is_ever_replaced(self):
+        self.backup.mkdir()
+        fake = FakeServer(folders=["/srv/bookorbit"])
+
+        self.main(fake, "y")
+        first = (self.backup / "bookorbit-20260919T141205.zip").read_bytes()
+        self.main(fake, "y")
+
+        self.assertEqual(self.zips(), ["bookorbit-20260919T141205-2.zip", "bookorbit-20260919T141205.zip"])
+        self.assertEqual((self.backup / "bookorbit-20260919T141205.zip").read_bytes(), first)
+
+    def test_a_failed_pull_is_not_zipped(self):
+        self.backup.mkdir()
+
+        with self.assertRaises(server.ServerError):
+            self.main(FakeServer(folders=["/srv/bookorbit"], rsync_exit=23, rsync_output="error\n"), "y")
+
+        self.assertEqual(self.zips(), [])
+
+    def test_too_little_space_stops_the_zip_but_keeps_the_backup_folder(self):
+        self.backup.mkdir()
+
+        with self.assertRaises(server.ServerError) as caught:
+            self.main(FakeServer(folders=["/srv/bookorbit"]), "y", disk_free=lambda path: 1000)
+
+        self.assertIn("Not enough free space", str(caught.exception))
+        self.assertEqual(self.zips(), [])
+        self.assertEqual((self.backup / "bookorbit" / "fanfiction" / "111.epub").read_bytes(), b"epub bytes")
+
+    def test_an_interrupted_zip_leaves_nothing_half_written(self):
+        self.backup.mkdir()
+        original = zipfile.ZipFile.write
+
+        def interrupted(archive, filename, *args, **options):
+            if str(filename).endswith(".epub"):
+                raise KeyboardInterrupt
+            return original(archive, filename, *args, **options)
+
+        with patch.object(zipfile.ZipFile, "write", interrupted), self.assertRaises(KeyboardInterrupt):
+            self.main(FakeServer(folders=["/srv/bookorbit"]), "y")
+
+        self.assertEqual(self.zips(), [])
+        self.assertEqual([path.name for path in self.backup.iterdir() if path.name.startswith(".")], [])
 
 
 @unittest.skipUnless(shutil.which("rsync"), "rsync is not installed")
@@ -210,8 +279,12 @@ class RealRsyncTest(unittest.TestCase):
 
             copied = backup / "book orbit" / "fan fic" / "111.epub"
             self.assertEqual(exit_code, 0)
-            self.assertEqual(sorted(path.name for path in backup.iterdir()), ["book orbit", "only in the backup.epub"],
+            self.assertEqual(sorted(path.name for path in backup.iterdir() if path.suffix != ".zip"),
+                             ["book orbit", "only in the backup.epub"],
                              "the server's folders stay inside a folder named like the server's")
+            [zipped] = backup.glob("book orbit-*.zip")
+            with zipfile.ZipFile(zipped) as archive:
+                self.assertEqual(archive.read("book orbit/fan fic/111.epub"), b"epub bytes")
             self.assertEqual(copied.read_bytes(), b"epub bytes")
             self.assertEqual(copied.stat().st_mtime, 1_600_000_000, "-t keeps the time")
             self.assertEqual((backup / "only in the backup.epub").read_bytes(), b"kept")
