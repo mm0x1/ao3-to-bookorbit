@@ -6,20 +6,8 @@ import logging
 import unittest
 
 from ao3archiver import prompts
-
-
-class Answers:
-    """Stands in for a person at a terminal, one typed line at a time."""
-
-    def __init__(self, *lines: str):
-        self.lines = list(lines)
-        self.questions: list[str] = []
-
-    def __call__(self, question: str) -> str:
-        self.questions.append(question)
-        if not self.lines:
-            raise EOFError
-        return self.lines.pop(0)
+from ao3archiver.common import ArchiverError
+from tests.support import Answers
 
 
 def refuse(question: str) -> str:
@@ -92,6 +80,18 @@ class ConfirmTest(unittest.TestCase):
 
         self.assertIn("no", logs.output[0])
         self.assertIn("not a terminal", logs.output[0])
+
+
+class RequireTerminalTest(unittest.TestCase):
+    def test_a_command_that_only_runs_on_a_yes_refuses_off_a_terminal(self):
+        with self.assertRaises(ArchiverError) as caught:
+            prompts.require_terminal("send_to_server.py", terminal_fn=lambda: False)
+
+        self.assertIn("send_to_server.py", str(caught.exception))
+        self.assertIn("terminal", str(caught.exception))
+
+    def test_at_a_terminal_it_lets_the_command_ask(self):
+        prompts.require_terminal("send_to_server.py", terminal_fn=lambda: True)
 
 
 class ChooseTest(unittest.TestCase):

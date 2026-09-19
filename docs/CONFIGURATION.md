@@ -5,11 +5,12 @@ environment, the legacy ini file, the SSH alias used to copy files, and the
 directory where logs, caches and backups live.
 
 1. [.env](#env)
-2. [Where each value can come from](#where-each-value-can-come-from)
-3. [Environment variables](#environment-variables)
-4. [The SSH alias](#the-ssh-alias)
-5. [Files outside the repository](#files-outside-the-repository)
-6. [Confirmations and --yes](#confirmations-and---yes)
+2. [The server](#the-server)
+3. [Where each value can come from](#where-each-value-can-come-from)
+4. [Environment variables](#environment-variables)
+5. [The SSH alias](#the-ssh-alias)
+6. [Files outside the repository](#files-outside-the-repository)
+7. [Confirmations and --yes](#confirmations-and---yes)
 
 ## .env
 
@@ -32,6 +33,12 @@ BOOKORBIT_USERNAME=
 BOOKORBIT_PASSWORD=
 # BOOKORBIT_TOKEN=
 # BOOKORBIT_LIBRARY_ID=
+
+# The server, for backup_server.py
+SERVER=
+SERVER_BOOKORBIT_DIR=
+SERVER_LIBRARY_DIR=
+BACKUP_DIR=
 ```
 
 | Key | Needed by | Notes |
@@ -42,10 +49,31 @@ BOOKORBIT_PASSWORD=
 | `BOOKORBIT_USERNAME`, `BOOKORBIT_PASSWORD` | `bookorbit-sync` | A dedicated account with **Edit metadata** and **Download**, nothing more. See [docs/BOOKORBIT.md](BOOKORBIT.md#credentials). |
 | `BOOKORBIT_TOKEN` | `bookorbit-sync` | An `accessToken` instead of an account. Expires after `JWT_EXPIRES_IN`, 15 minutes by default. |
 | `BOOKORBIT_LIBRARY_ID` | `bookorbit-sync` | Restrict the sync to one BookOrbit library. Optional. |
+| `SERVER` | `backup_server.py` | The server's alias in `~/.ssh/config`, such as `myserver`. See [the SSH alias](#the-ssh-alias). |
+| `SERVER_BOOKORBIT_DIR` | `backup_server.py` | BookOrbit's folder on the server, as an absolute path such as `/path/to/bookorbit`. The backup copies all of it. |
+| `SERVER_LIBRARY_DIR` | — | The folder inside `SERVER_BOOKORBIT_DIR` that new books are added to, such as `/path/to/bookorbit/fanfiction`. |
+| `BACKUP_DIR` | `backup_server.py` | The folder on this PC the backup goes into. `~` is expanded. |
 
 A line must be `KEY=value`. Quotes around a value are stripped, a line whose
 first character is `#` is a comment, and any key not listed above is ignored — one file can hold settings
-for several tools and each caller only ever sees its own.
+for several tools and each caller only ever sees its own. A comment must have a
+line of its own: `SERVER=myserver  # my server` sets `SERVER` to everything after
+the `=`.
+
+## The server
+
+`backup_server.py` reads `SERVER`, `SERVER_BOOKORBIT_DIR` and `BACKUP_DIR`.
+Three rules hold for all of them:
+
+- **Only you write them.** No command here ever writes `.env`.
+- **Nothing is guessed.** There are no defaults. A command missing a setting
+  stops before it touches anything and prints the exact lines to add, each
+  under a comment saying what it is for.
+- **Every run prints the values it is using**, and the exact rsync command it
+  will run, before it asks to start.
+
+Paths on the server must be absolute; `~` is expanded only in `BACKUP_DIR`,
+which is on this PC. [docs/SERVER.md](SERVER.md) covers the backup itself.
 
 ## Where each value can come from
 
@@ -82,13 +110,15 @@ using credentials from /path/to/ao3-to-calibre/.env
 | `AO3_USERNAME`, `AO3_PASSWORD` | Override the credentials from `.env`. |
 | `BOOKORBIT_*` | Override the BookOrbit settings from `.env`. |
 | `CALIBRE_LIBRARY` | Override the library path `archiver.py` uses. |
+| `SERVER`, `SERVER_*`, `BACKUP_DIR` | Override the server settings from `.env`. |
 | `AO3_PROTECTED_PATHS` | Extra directories a cache, report or backup may never be written inside, separated by `:`. The Calibre library and this repository are always protected. Useful if you keep a sibling clone of the link harvester next door. |
 
 ## The SSH alias
 
 Copying files to a reading server is plain `rsync`. Define the server once in
 `~/.ssh/config` so no host, user or key ever appears in a command — or in a
-shell history, or in anything you paste into a bug report:
+shell history, or in anything you paste into a bug report. That alias is what
+`SERVER` in `.env` names:
 
 ```sshconfig
 Host myserver
@@ -111,7 +141,7 @@ nothing personal ends up in the repository:
 
 | Path | Contents |
 | --- | --- |
-| `logs/` | One timestamped log per run of either tool. |
+| `logs/` | One timestamped log per run of any command. |
 | `download-failures.jsonl` | Works that failed or are unavailable. Permanent entries (deleted, unrevealed) are skipped by later runs. |
 | `scan.json` | The backfill's map of library EPUBs to AO3 works. |
 | `ao3-cache.jsonl` | Fetched AO3 statistics. Append-only; the latest record per work wins. |
@@ -148,6 +178,8 @@ script has to satisfy. Two exceptions worth knowing:
   always has.
 - `bookorbit-sync` writes to a server, and off a terminal requires `--yes`.
   `--dry-run` needs nothing.
+- `backup_server.py` takes no flags at all, so its question is the only way to
+  say yes. Off a terminal it refuses to start and says why.
 
 ---
 

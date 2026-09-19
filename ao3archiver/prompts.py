@@ -11,6 +11,10 @@ Every question asked through this module therefore:
 
 The ``--approve-*`` flags stay authoritative. A prompt is an alternative to a
 flag for someone sitting at a terminal, never a new gate a script must satisfy.
+
+The commands that change the server have no flags at all: their questions are
+the only way to say yes, so off a terminal they refuse to start instead
+(:func:`require_terminal`).
 """
 
 from __future__ import annotations
@@ -18,6 +22,8 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 import logging
 import sys
+
+from ao3archiver.common import ArchiverError
 
 LOGGER = logging.getLogger("ao3.prompts")
 
@@ -31,6 +37,20 @@ def at_a_terminal() -> bool:
 
     streams = (sys.stdin, sys.stdout)
     return all(stream is not None and stream.isatty() for stream in streams)
+
+
+def require_terminal(command: str, *, terminal_fn: Callable[[], bool] = at_a_terminal) -> None:
+    """Refuse to start a command whose questions nobody here could answer.
+
+    Taking the defaults would be a guess about someone else's server, so a
+    command that only runs on a yes stops instead.
+    """
+
+    if not terminal_fn():
+        raise ArchiverError(
+            f"{command} asks before it changes anything, and there is no terminal here to answer it. "
+            "Run it from a terminal."
+        )
 
 
 def _say(message: str) -> None:

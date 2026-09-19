@@ -1,13 +1,16 @@
-"""Shared fakes and fixtures: a stand-in AO3, sample EPUBs, and scan reports."""
+"""Shared fakes and fixtures: a stand-in AO3 and server, sample EPUBs, and scan reports."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 import io
+import logging
 from pathlib import Path
 import re
+import shlex
 import zipfile
 
-from ao3archiver import ao3_client, backfill
+from ao3archiver import ao3_client, backfill, server
 from ao3archiver.credentials import AO3Credentials
+from ao3archiver.run_log import ROOT_LOGGER_NAME
 
 
 # The transformation that produced the library's unreadable files: valid XML,
@@ -348,3 +351,97 @@ def make_client(session: RoutedSession, credentials: AO3Credentials | None = CRE
         credentials, delay_seconds=10.0, sleep_fn=sleep, session=session, monotonic_fn=lambda: clock[0]
     )
     return client, sleeps
+
+
+class Answers:
+    """Stands in for a person at a terminal, one typed line at a time."""
+
+    def __init__(self, *lines: str):
+        self.lines = list(lines)
+        self.questions: list[str] = []
+
+    def __call__(self, question: str) -> str:
+        self.questions.append(question)
+        if not self.lines:
+            raise EOFError
+        return self.lines.pop(0)
+
+
+RSYNC_STATS = """\
+Number of files: 3 (reg: 1, dir: 2)
+Number of regular files transferred: 1
+Total file size: 6 bytes
+
+sent 47 bytes  received 147 bytes  388.00 bytes/sec
+total size is 6  speedup is 0.03
+"""
+
+
+class FakeServer:
+    """Stands in for ssh and rsync: answers the folder check and records every command."""
+
+    def __init__(self, *, folders: Sequence[str] = (), ssh_exit: int | None = None,
+                 rsync_exit: int = 0, rsync_output: str = RSYNC_STATS) -> None:
+        self.folders = set(folders)
+        self.ssh_exit = ssh_exit
+        self.rsync_exit = rsync_exit
+        self.rsync_output = rsync_output
+        self.calls: list[list[str]] = []
+
+    @property
+    def rsync_calls(self) -> list[list[str]]:
+        return [call for call in self.calls if call[0] == "rsync"]
+
+    def __call__(self, args: Sequence[str], *, echo: Callable[[str], None] | None = None) -> server.RunResult:
+        self.calls.append(list(args))
+        if args[0] == "ssh":
+            if self.ssh_exit is not None:
+                return server.RunResult(self.ssh_exit, "ssh: connect to host myserver port 22: No route to host\n")
+            folder = shlex.split(args[-1])[-1]
+            return server.RunResult(0 if folder in self.folders else 1, "")
+        for line in self.rsync_output.splitlines(keepends=True):
+            if echo is not None:
+                echo(line)
+        return server.RunResult(self.rsync_exit, self.rsync_output)
+
+
+FAKE_SSH = """\
+#!/bin/sh
+# Stands in for ssh on this machine: skip ssh's options, drop the host, and
+# hand the rest to a shell, the way the server's sshd would.
+while [ "$1" = "-o" ]; do shift 2; done
+shift
+exec sh -c "$*"
+"""
+
+
+def local_ssh(directory: Path) -> Path:
+    """A fake ssh that runs the "server's" commands here, for real rsync to talk to.
+
+    Point ``RSYNC_RSH`` at it too, so ``myserver:/some/path`` is this machine.
+    """
+
+    script = directory / "fake-ssh"
+    script.write_text(FAKE_SSH, encoding="utf-8")
+    script.chmod(0o755)
+    return script
+
+
+def local_runner(fake_ssh: Path) -> server.Runner:
+    """The real runner, with ssh swapped for :func:`local_ssh`."""
+
+    def run(args: Sequence[str], *, echo: Callable[[str], None] | None = None) -> server.RunResult:
+        if args[0] == "ssh":
+            args = [str(fake_ssh), *args[1:]]
+        return server.default_runner(args, echo=echo)
+
+    return run
+
+
+def close_run_logs() -> None:
+    """Detach the handlers a command's ``configure_logging`` left behind, closing its log file."""
+
+    logger = logging.getLogger(ROOT_LOGGER_NAME)
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        handler.close()
