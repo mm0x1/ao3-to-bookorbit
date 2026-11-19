@@ -50,17 +50,26 @@ python3 start_here.py
 
 ## 1. Harvest links
 
-1. Set up [ao3downloader](https://github.com/nianeyna/ao3downloader) following
-   its README, including the Python version it asks for.
-2. Run `python ao3downloader.py` and choose
-   `l: get all work links from an ao3 listing (saves links only)`.
-3. Paste the URL of an AO3 search results page. Logging in is optional.
-4. Repeat for as many searches as you like.
+1. Copy `searches.example.toml` to `searches.toml`.
+2. For each fandom, open AO3, filter and sort its works the way you like (by
+   hits, say), and add a `[[search]]` with that page's address and how many
+   works you want that you do not have yet.
+3. Run it:
 
-Copy the resulting `.txt` files into a `links/` folder in this repository.
-Duplicate links across files are fine: they are counted and collapsed. Let
-ao3downloader finish before downloading: both sign in to the same AO3 account,
-and the download warns if it is still running.
+```sh
+python3 harvest_links.py
+```
+
+It shows the plan, asks once, and then turns each listing's pages until it has
+found that many works that are not on the server, not in `downloaded/` and not
+already in `links/`. A work in two fandoms is counted once. Unfinished works on
+the server whose listing shows more chapters come along as updates. Each
+search's links go to `links/<name>.txt`. [docs/HARVESTING.md](HARVESTING.md)
+has the details.
+
+Link files from anywhere else, such as
+[ao3downloader](https://github.com/nianeyna/ao3downloader), still work: drop
+them into `links/`. Duplicate links across files are counted and collapsed.
 
 ## 2. Download
 

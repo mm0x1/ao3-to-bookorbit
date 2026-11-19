@@ -25,7 +25,8 @@ Please run the whole suite before opening a pull request.
 - **Small, focused changes.** One logical change per commit, and a pull request
   that can be read in one sitting.
 - **One script per step.** Each pipeline step is an entry script at the root
-  (`download_fics.py`, `send_to_server.py`, `backup_server.py`), a few lines
+  (`harvest_links.py`, `download_fics.py`, `send_to_server.py`,
+  `backup_server.py`), a few lines
   that call into `ao3archiver/`; `start_here.py` is the front door, and the
   retired Calibre backfill lives in `retired/`. README.md has the full layout.
 - **Tests alongside the code.** One test module per package module, functional

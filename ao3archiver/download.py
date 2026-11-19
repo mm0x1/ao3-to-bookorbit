@@ -1,6 +1,6 @@
 """Download AO3 works and bake their metadata into each EPUB.
 
-Given a directory of link files (as produced by ``ao3downloader``), this
+Given a directory of link files (as written by ``harvest_links.py``), this
 fetches each work page, downloads the EPUB it links to, calculates the local
 Words/Gfog metrics from the file, and writes everything into the EPUB: an
 ``ao3`` identifier, a visible statistics block, portable ``ao3:*`` metadata,
@@ -103,8 +103,8 @@ Action = Literal["download", "enrich", "update"]
 # the EPUB only when AO3 has more chapters.
 REQUESTS_PER_ACTION: dict[Action, int] = {"download": 2, "enrich": 1, "update": 1}
 OUTCOME_LABELS: dict[Action, str] = {"download": "downloaded", "enrich": "enriched", "update": "updated"}
-# The link harvester signs in to the same AO3 account, and the account lock
-# cannot see it.
+# ao3downloader signs in to the same AO3 account, and the account lock cannot
+# see it; harvest_links.py holds the lock like any other run.
 HARVESTER_NAMES = frozenset({"ao3downloader.py", "ao3downloader"})
 
 
@@ -731,7 +731,7 @@ def run_downloads(
 
     if dry_run:
         if ao3_run_active(lock_path):
-            LOGGER.warning("another AO3 run (the backfill or a download) is active; a real run would refuse to start")
+            LOGGER.warning("another AO3 run (the backfill, a harvest or a download) is active; a real run would refuse to start")
         for item in planned[:DRY_RUN_PREVIEW]:
             LOGGER.info(
                 f"would {item.action}: work={item.target.work_id} "

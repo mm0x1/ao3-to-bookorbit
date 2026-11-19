@@ -2,6 +2,9 @@
 .env
 personal.ini
 
+# Your AO3 searches for harvest_links.py
+searches.toml
+
 # Your data: link lists and downloaded EPUBs
 links/
 downloaded/

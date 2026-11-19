@@ -3,7 +3,7 @@
 Deliberately a teacher rather than a wrapper. Every flow prints the exact
 command it would run before offering to run it, because the commands are what
 the guides in ``docs/`` document and what an unattended run needs. Each of the
-three scripts it offers shows its own plan and asks before it changes
+four scripts it offers shows its own plan and asks before it changes
 anything, so running one from here is as safe as running it by hand. Nothing
 here is required: the scripts behave the same with or without this screen.
 """
@@ -20,6 +20,7 @@ from ao3archiver.bookorbit import BookOrbitError, load_bookorbit_config
 from ao3archiver.common import ArchiverError, REPO_ROOT
 from ao3archiver.credentials import CredentialError, DEFAULT_DOTENV_PATH, load_ao3_credentials
 from ao3archiver.download import DEFAULT_LINKS_DIR, DEFAULT_OUTPUT_DIR, load_link_inventory
+from ao3archiver.harvest import DEFAULT_SEARCHES_PATH, EXAMPLE_NAME, HarvestError, load_searches
 from ao3archiver.server import ALL_KEYS, load_server_settings, missing_settings, ServerError
 
 SUMMARY = (
@@ -29,6 +30,7 @@ SUMMARY = (
 
 DOCS = (
     ("docs/TUTORIAL.md", "the whole pipeline, end to end"),
+    ("docs/HARVESTING.md", "harvest_links.py: searches.toml and what counts as new"),
     ("docs/DOWNLOADING.md", "download_fics.py: the plan, owned works, unattended runs"),
     ("docs/SERVER.md", "send_to_server.py and backup_server.py"),
     ("docs/BOOKORBIT.md", "BookOrbit's custom fields and folder watch"),
@@ -77,12 +79,25 @@ def server_check(
     return Check("Server settings", True, f"{settings.server}:{settings.library_dir}")
 
 
+def searches_check(path: Path) -> Check:
+    """Whether harvest_links.py has searches to run; links/ can also be filled by hand."""
+
+    if not path.is_file():
+        return Check(path.name, None, f"none yet (copy {EXAMPLE_NAME} to harvest links)")
+    try:
+        searches = load_searches(path)
+    except (HarvestError, OSError) as error:
+        return Check(path.name, False, str(error).splitlines()[0])
+    return Check(path.name, True, f"{len(searches)} search(es), {sum(s.works for s in searches)} new works wanted")
+
+
 def setup_checks(
     *,
     dotenv_path: Path = DEFAULT_DOTENV_PATH,
     environ: Mapping[str, str] | None = None,
     links_dir: Path = DEFAULT_LINKS_DIR,
     output_dir: Path = DEFAULT_OUTPUT_DIR,
+    searches_path: Path = DEFAULT_SEARCHES_PATH,
 ) -> tuple[Check, ...]:
     """Answer, one line each, every question someone asks before their first run."""
 
@@ -105,6 +120,7 @@ def setup_checks(
         checks.append(Check("BookOrbit", False, str(error)))
 
     checks.append(server_check(environ, dotenv_path=dotenv_path))
+    checks.append(searches_check(searches_path))
 
     if links_dir.is_dir():
         inventory = load_link_inventory(links_dir)
@@ -132,10 +148,13 @@ def flows() -> tuple[Flow, ...]:
         Flow(
             "Harvest links from AO3",
             (
-                "ao3downloader (github.com/nianeyna/ao3downloader) saves every work link",
-                "from an AO3 search as a .txt file. Copy those files into links/.",
-                "Nothing in this project needs to run for this step.",
+                "Reads each AO3 search in searches.toml and turns its pages until it has found",
+                "as many works as you asked for that you do not have yet: not on the server,",
+                "not in downloaded/ or links/, and not found by an earlier search. Unfinished",
+                "works with new chapters come along too. Writes links/<search>.txt; asks first.",
             ),
+            commands=("python3 harvest_links.py",),
+            offer="python3 harvest_links.py",
         ),
         Flow(
             "Download the works",

@@ -114,9 +114,9 @@ run unattended:
   525) is simply retried.
 - **Rejected credentials stop the run**, since retrying them cannot succeed.
 - **Only one AO3 run can use the account at a time.** `download_fics.py` refuses to
-  start while a backfill fetch or another download is running. It cannot see
-  the link harvester, ao3downloader, which signs in to the same account, so it
-  warns when ao3downloader is running: let it finish first.
+  start while a backfill fetch, a harvest or another download is running. It
+  cannot see ao3downloader, which signs in to the same account, so it warns when
+  ao3downloader is running: let it finish first.
 
 ```sh
 nohup python3 download_fics.py &

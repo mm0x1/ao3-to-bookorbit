@@ -20,7 +20,7 @@ already on disk.
 
 | # | Step | Command | From → to | Runs |
 | --- | --- | --- | --- | --- |
-| 1 | Harvest links | [ao3downloader](https://github.com/nianeyna/ao3downloader), a separate project | an AO3 search → `links/*.txt` | by hand |
+| 1 | Harvest links | `harvest_links.py` | the AO3 searches in `searches.toml` → `links/*.txt` | asks at the start, then unattended |
 | 2 | Download | `download_fics.py` | `links/` → `downloaded/` | asks at the start, then unattended |
 | 3 | Send | `send_to_server.py` | `downloaded/` → the server, then BookOrbit's fields | at a terminal |
 | 4 | Scan | BookOrbit's folder watch | — | automatic |
@@ -32,6 +32,10 @@ from `.env`, which only you edit: a missing one stops the run with the exact
 line to add, and nothing is guessed. Nothing is ever deleted, locally or on the
 server; you empty `downloaded/` yourself.
 
+- **A harvest counts only works you do not have.** Ask for 400 DCU works sorted
+  by hits and `harvest_links.py` reads past the pages you already own until it
+  has found 400 that are not on the server, in `downloaded/` or in `links/`,
+  across as many fandoms as `searches.toml` lists, each work counted once.
 - **Identity is the AO3 work ID.** Before downloading, `download_fics.py` asks
   BookOrbit which works are already on the server. A work you own is downloaded
   again only when it is unfinished and AO3 has more chapters, or when you say so.
@@ -89,6 +93,7 @@ git clone https://github.com/mm0x1/ao3-to-bookorbit.git && cd ao3-to-bookorbit
 python3 -m venv venv && source venv/bin/activate   # optional
 pip install -r requirements.txt
 cp .env.example .env        # then fill it in: see docs/CONFIGURATION.md
+cp searches.example.toml searches.toml   # then list your AO3 searches: see docs/HARVESTING.md
 ```
 
 Then start at the front door, which checks the setup and offers each step:
@@ -107,6 +112,7 @@ Setup
   [ok]  AO3 credentials  from /path/to/ao3-to-bookorbit/.env
   [ok]  BookOrbit        http://myserver:8080/api/v1
   [ok]  Server settings  myserver:/path/to/bookorbit/fanfiction
+  [ok]  searches.toml    2 search(es), 600 new works wanted
   [ok]  links/           35 works in 1 file(s)
   [--]  downloaded/      0 EPUB(s)
 ```
@@ -116,6 +122,7 @@ menu it prints each step's exact command and offers to run it; each command
 asks before it changes anything. The same commands by hand:
 
 ```sh
+python3 harvest_links.py      # searches.toml -> links/
 python3 download_fics.py      # links/ -> downloaded/
 python3 send_to_server.py     # downloaded/ -> the server, then BookOrbit's fields
 python3 backup_server.py      # the server -> BACKUP_DIR
@@ -132,6 +139,7 @@ create first.
 | Guide | What it covers |
 | --- | --- |
 | [docs/TUTORIAL.md](docs/TUTORIAL.md) | The whole pipeline end to end, once, and the Calibre route without a server |
+| [docs/HARVESTING.md](docs/HARVESTING.md) | `harvest_links.py`: the searches file, what counts as a work you already have, and when a search stops |
 | [docs/DOWNLOADING.md](docs/DOWNLOADING.md) | `download_fics.py`: the plan, works you already own, unattended runs, and what happens when a work or AO3 fails |
 | [docs/SERVER.md](docs/SERVER.md) | `send_to_server.py` and `backup_server.py` |
 | [docs/BOOKORBIT.md](docs/BOOKORBIT.md) | BookOrbit's custom fields, folder watch, and the things its own docs do not cover |
@@ -156,6 +164,7 @@ and where it comes from.
 
 ```text
 start_here.py               entry point: the setup check and the menu
+harvest_links.py            entry point: collect links to works you do not have yet
 download_fics.py            entry point: download works
 send_to_server.py           entry point: send downloaded works to the server
 backup_server.py            entry point: back the server up to this PC
@@ -164,6 +173,7 @@ retired/
 ao3archiver/
   ao3_client.py             everything that talks to AO3: login, request policy,
                             page classification, EPUB downloads, run lock, work queue
+  harvest.py                the harvest: searches.toml, listing pages, what counts as new
   download.py               the download workflow
   send.py                   the send: placing each file, rsync, then BookOrbit's fields
   server_backup.py          the backup

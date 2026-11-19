@@ -446,3 +446,68 @@ def close_run_logs() -> None:
     for handler in list(logger.handlers):
         logger.removeHandler(handler)
         handler.close()
+
+
+def work_blurb(work_id: str, chapters: str = "1/1", *, summary_link: str | None = None) -> str:
+    """One work as an AO3 listing shows it, nested tag lists and all."""
+
+    if "/" in chapters and not chapters.startswith("1/"):
+        written, planned = chapters.split("/")
+        chapters_html = f'<a href="/works/{work_id}/chapters/9">{written}</a>/{planned}'
+    else:
+        chapters_html = chapters
+    summary = f'<p>Sequel to <a href="{summary_link}">another work</a>.</p>' if summary_link else "<p>Summary.</p>"
+    return f"""
+  <li id="work_{work_id}" class="work blurb group work-{work_id} user-1" role="article">
+  <div class="header module">
+    <h4 class="heading"><a href="/works/{work_id}">Work {work_id}</a> by
+      <a rel="author" href="/users/someone/pseuds/someone">someone</a></h4>
+    <h5 class="fandoms heading"><span class="landmark">Fandoms:</span>
+      <a class="tag" href="/tags/Example/works">Example</a></h5>
+    <ul class="required-tags">
+<li><a class="help symbol question modal" href="/help/symbols_key"><span class="rating-general-audience rating" title="General Audiences"><span class="text">General Audiences</span></span></a></li>
+<li><a class="help symbol question modal" href="/help/symbols_key"><span class="complete-no iswip" title="Work in Progress"><span class="text">Work in Progress</span></span></a></li>
+</ul>
+    <p class="datetime">09 Jun 2025</p>
+  </div>
+  <ul class="tags commas">
+    <li class='warnings'><strong><a class="tag" href="/tags/No%20Archive%20Warnings%20Apply/works">No Archive Warnings Apply</a></strong></li><li class='freeforms'><a class="tag" href="/tags/Fluff/works">Fluff</a></li>
+  </ul>
+  <blockquote class="userstuff summary">{summary}</blockquote>
+  <dl class="stats">
+    <dt class="language">Language:</dt><dd class="language" lang="en">English</dd>
+    <dt class="words">Words:</dt><dd class="words">4,712</dd>
+    <dt class="chapters">Chapters:</dt><dd class="chapters">{chapters_html}</dd>
+    <dt class="kudos">Kudos:</dt><dd class="kudos"><a href="/works/{work_id}#kudos">24</a></dd>
+    <dt class="hits">Hits:</dt><dd class="hits">94</dd>
+  </dl>
+  </li>"""
+
+
+SERIES_BLURB = """
+  <li id="series_15213" class="series blurb group series-15213 user-2" role="article">
+  <div class="header module"><h4 class="heading"><a href="/series/15213">A Series</a></h4></div>
+  <ul class="series"><li><a href="/works/777">Part 1</a></li></ul>
+  </li>"""
+
+
+def listing_page(*blurbs: str, page: int = 1, next_href: str | None = None, logged_in: bool = True) -> str:
+    """An AO3 listing page: its blurbs between two copies of the pagination, as AO3 renders it."""
+
+    next_item = (
+        f'<li class="next" title="next"><a rel="next" href="{next_href}">Next &#8594;</a></li>'
+        if next_href
+        else '<li class="next" title="next"><span class="disabled">Next &#8594;</span></li>'
+    )
+    pagination = (
+        '<ol class="pagination actions" role="navigation" title="pagination">'
+        '<li class="previous" title="previous"><span class="disabled">&#8592; Previous</span></li>'
+        f'<li><span class="current">{page}</span></li>{next_item}</ol>'
+    )
+    return f"""<html><head><title>Works in Example | Archive of Our Own</title></head>
+<body class="{'logged-in' if logged_in else 'logged-out'}"><div id="main" class="works-index dashboard region">
+<h2 class="heading">1 - 20 of 12,345 Works in <a class="tag" href="/tags/Example/works">Example</a></h2>
+<h4 class="landmark heading">Pages Navigation</h4>{pagination}
+<ol class="work index group">{''.join(blurbs)}</ol>
+<h4 class="landmark heading">Pages Navigation</h4>{pagination}
+</div></body></html>"""

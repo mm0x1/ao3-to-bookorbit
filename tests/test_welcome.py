@@ -69,6 +69,7 @@ class SetupCheckTest(unittest.TestCase):
             "environ": {},
             "links_dir": self.root / "links",
             "output_dir": self.root / "downloaded",
+            "searches_path": self.root / "searches.toml",
         }
         return welcome.setup_checks(**{**defaults, **options})
 
@@ -134,6 +135,22 @@ class SetupCheckTest(unittest.TestCase):
         self.assertIn("2 works", details(checks)["links/"])
         self.assertIn("1 EPUB", details(checks)["downloaded/"])
 
+    def test_searches_are_optional_but_a_broken_file_is_flagged_here_first(self):
+        self.assertIsNone(marks(self.checks())["searches.toml"], "links/ can be filled by hand")
+
+        (self.root / "searches.toml").write_text('[[search]]\nname = "x"\n', encoding="utf-8")
+
+        self.assertEqual(marks(self.checks())["searches.toml"], False)
+        self.assertIn("works is missing", details(self.checks())["searches.toml"])
+
+    def test_the_searches_are_summed_up(self):
+        (self.root / "searches.toml").write_text(
+            '[[search]]\nname = "x"\nurl = "https://archiveofourown.org/tags/X/works"\nworks = 40\n',
+            encoding="utf-8",
+        )
+
+        self.assertIn("40 new works", details(self.checks())["searches.toml"])
+
 
 class FlowTest(unittest.TestCase):
     def test_the_menu_is_the_pipeline_in_order(self):
@@ -148,11 +165,17 @@ class FlowTest(unittest.TestCase):
             ],
         )
 
-    def test_each_of_the_three_scripts_is_offered_since_each_asks_first(self):
+    def test_each_of_the_four_scripts_is_offered_since_each_asks_first(self):
         offered = [flow.offer for flow in welcome.flows() if flow.offer is not None]
 
         self.assertEqual(
-            offered, ["python3 download_fics.py", "python3 send_to_server.py", "python3 backup_server.py"]
+            offered,
+            [
+                "python3 harvest_links.py",
+                "python3 download_fics.py",
+                "python3 send_to_server.py",
+                "python3 backup_server.py",
+            ],
         )
         for command in offered:
             self.assertTrue((welcome.REPO_ROOT / command.split()[1]).is_file(), command)
@@ -217,9 +240,10 @@ class MenuTest(unittest.TestCase):
         self.assertEqual(self.ran, [["python3", "download_fics.py"]])
 
     def test_a_flow_with_nothing_to_run_just_explains_itself(self):
-        self.main(choices=(0,))
+        documentation = [flow.title for flow in welcome.flows()].index("Read the documentation")
+        self.main(choices=(documentation,))
 
-        self.assertIn("ao3downloader", self.text())
+        self.assertIn("docs/HARVESTING.md", self.text())
         self.assertEqual(self.ran, [])
 
     def test_off_a_terminal_it_prints_what_it_can_and_stops(self):

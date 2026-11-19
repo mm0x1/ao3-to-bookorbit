@@ -1,0 +1,27 @@
+# Copy to searches.toml and fill in. The real searches.toml is ignored by Git.
+#
+# One [[search]] per AO3 listing to harvest. Open AO3, filter and sort the way
+# you like (by hits, kudos, date...), and paste the page's address as url: a
+# tag's works, a filtered search, a collection, or someone's bookmarks.
+#
+# works is how many works you do NOT have yet to bring back. A work counts as
+# had when it is on the server, in downloaded/, already in links/, or found by
+# an earlier search in this file, so the harvest keeps turning pages past the
+# ones you already own until it has found that many.
+#
+# max_pages (optional) stops a search after that many listing pages even if it
+# found fewer. Without it, a search reads at most 5 times the pages its works
+# would need: 100 works -> 25 pages.
+#
+# Each search's links go to links/<name>.txt, for download_fics.py.
+
+[[search]]
+name = "Example fandom"
+url = "https://archiveofourown.org/tags/Example%20Fandom/works?work_search%5Bsort_column%5D=hits"
+works = 100
+
+[[search]]
+name = "Another fandom, deeper"
+url = "https://archiveofourown.org/tags/Another%20Fandom/works?work_search%5Bsort_column%5D=hits"
+works = 400
+max_pages = 200

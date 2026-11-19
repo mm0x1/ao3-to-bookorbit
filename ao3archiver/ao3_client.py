@@ -1251,7 +1251,7 @@ def account_lock(lock_path: Path = ACCOUNT_LOCK_PATH) -> Iterator[None]:
             lock.seek(0)
             holder = lock.read().strip() or "an unknown process"
             raise AnotherRunActive(
-                f"Another AO3 run already holds {lock_path} ({holder}): a backfill fetch or a "
+                f"Another AO3 run already holds {lock_path} ({holder}): a backfill fetch, a harvest or a "
                 "download. Only one run can use the account at a time; wait for it to finish."
             ) from error
         lock.seek(0)
@@ -1439,11 +1439,55 @@ class AO3DownloadClient:
     def download_epub(self, url: str, work_id: str) -> bytes:
         """Download EPUB bytes under the same rules as a work-page fetch."""
 
+        subject = f"EPUB for work {work_id}"
+        response = self._get_politely(url, subject, allowed_hosts=DOWNLOAD_HOSTS)
+        if response.headers.get("Content-Type", "").casefold().startswith("text/html"):
+            raise UnexpectedHTML(
+                f"AO3 returned an HTML page instead of the {subject} "
+                f"(page title: {_page_title(response.text) or '<none>'!r})"
+            )
+        return response.content
+
+    def fetch_listing_page(self, url: str) -> str:
+        """Fetch one page of an AO3 listing (a tag's works, a search, bookmarks) as HTML.
+
+        A listing hides archive-locked works from anyone signed out, so a page
+        rendered for a signed-out reader would quietly come back short. When
+        this client has credentials, such a page gets one fresh sign-in and is
+        asked for again before it counts as an authentication failure.
+        """
+
+        subject = "listing page"
+        if not _is_ao3_url(url):
+            raise NetworkStopError(f"refusing to fetch a {subject} outside archiveofourown.org: {url}")
+        for attempt in range(2):
+            response = self._get_politely(url, subject, allowed_hosts=AO3_HOSTS)
+            if not response.headers.get("Content-Type", "").casefold().startswith("text/html"):
+                raise UnexpectedHTML(f"AO3 returned a non-HTML response for a {subject}")
+            if self.credentials is None or LOGGED_IN_BODY_PATTERN.search(response.text):
+                return response.text
+            if attempt == 0:
+                LOGGER.warning(f"AO3 served a {subject} to a signed-out reader; signing in again once")
+                self.sign_in()
+        raise AuthenticationFailure(f"AO3 kept serving the {subject} to a signed-out reader")
+
+    def _get_politely(
+        self,
+        url: str,
+        subject: str,
+        *,
+        allowed_hosts: frozenset[str],
+    ) -> requests.Response:
+        """GET ``url`` until AO3 answers 200, under the request policy; the caller judges the body.
+
+        Paced, redirect-checked, and patient with Cloudflare origin errors,
+        transient 5xx and rate limits, signing in again once if AO3 asks.
+        """
+
         transient_attempts = 0
         cloudflare_count = 0
         rate_limit_count = 0
         reauthenticated = False
-        subject = f"EPUB for work {work_id}"
 
         for _ in range(MAX_TRANSIENT_ATTEMPTS + MAX_RATE_LIMIT_ATTEMPTS + 4):
             try:
@@ -1455,13 +1499,13 @@ class AO3DownloadClient:
                     request_started_callback=self.pacer.request_started,
                     request_deferred_callback=self.pacer.defer,
                     sleep_fn=self.sleep_fn,
-                    allowed_hosts=DOWNLOAD_HOSTS,
+                    allowed_hosts=allowed_hosts,
                 )
             except requests.RequestException as error:
                 transient_attempts += 1
                 if transient_attempts >= MAX_TRANSIENT_ATTEMPTS:
                     raise NetworkStopError(
-                        f"repeated transient failures downloading the {subject} ({type(error).__name__})"
+                        f"repeated transient failures fetching the {subject} ({type(error).__name__})"
                     ) from error
                 self._wait(
                     self._backoff(transient_attempts),
@@ -1536,14 +1580,9 @@ class AO3DownloadClient:
 
             if status != 200:
                 raise NetworkStopError(f"AO3 returned HTTP {status} for the {subject}")
-            if is_html:
-                raise UnexpectedHTML(
-                    f"AO3 returned an HTML page instead of the {subject} "
-                    f"(page title: {_page_title(response.text) or '<none>'!r})"
-                )
-            return response.content
+            return response
 
-        raise NetworkStopError(f"could not download the {subject}")
+        raise NetworkStopError(f"could not fetch the {subject}")
 
 
 @dataclass(frozen=True)

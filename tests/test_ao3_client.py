@@ -22,6 +22,7 @@ from tests.support import (
     FakeResponse,
     FakeSession,
     html,
+    listing_page,
     make_client,
     MYSTERY_PAGE,
     redirect,
@@ -1393,6 +1394,55 @@ class DownloadEpubTest(unittest.TestCase):
         client, _, _ = self.download(epub_reply("Please log in, she said, or you must log in to continue."))
 
         self.assertTrue(client.download_epub(self.URL, "111").startswith(b"PK"))
+
+
+class FetchListingPageTest(unittest.TestCase):
+    URL = "https://archiveofourown.org/tags/Example/works"
+
+    def fetch(self, *replies: Reply, credentials=CREDENTIALS):
+        session = RoutedSession({self.URL: list(replies)})
+        client, sleeps = make_client(session, credentials)
+        return client, session, sleeps
+
+    def test_a_signed_in_page_is_returned(self):
+        client, _, _ = self.fetch(html(200, listing_page()))
+
+        self.assertIn("pagination", client.fetch_listing_page(self.URL))
+
+    def test_an_address_outside_ao3_is_never_requested(self):
+        client, session, _ = self.fetch()
+
+        with self.assertRaises(ao3_client.NetworkStopError):
+            client.fetch_listing_page("https://evil.example/tags/Example/works")
+        self.assertEqual(session.requests, [])
+
+    def test_a_page_served_signed_out_signs_in_once_and_asks_again(self):
+        client, session, _ = self.fetch(html(200, listing_page(logged_in=False)), html(200, listing_page()))
+        sign_in_replies(session)
+
+        self.assertIn("logged-in", client.fetch_listing_page(self.URL))
+        self.assertEqual(session.requests.count("POST https://archiveofourown.org/users/login"), 1)
+
+    def test_a_page_still_signed_out_after_signing_in_is_an_authentication_failure(self):
+        signed_out = listing_page(logged_in=False)
+        client, session, _ = self.fetch(html(200, signed_out), html(200, signed_out))
+        sign_in_replies(session)
+
+        with self.assertRaises(ao3_client.AuthenticationFailure):
+            client.fetch_listing_page(self.URL)
+
+    def test_a_rate_limit_waits_the_exact_retry_after(self):
+        client, _, sleeps = self.fetch(Reply(429, "slow down", headers={"Retry-After": "300"}), html(200, listing_page()))
+
+        client.fetch_listing_page(self.URL)
+
+        self.assertIn(300.0, sleeps)
+
+    def test_a_missing_listing_is_an_error_not_an_empty_page(self):
+        client, _, _ = self.fetch(html(404, "<title>Error 404</title>"))
+
+        with self.assertRaises(ao3_client.NetworkStopError):
+            client.fetch_listing_page(self.URL)
 
 
 class AccountLockTest(unittest.TestCase):

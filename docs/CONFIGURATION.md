@@ -146,7 +146,7 @@ command that uses it takes `--cache-dir`, `--log-dir` or `--epub-backup-dir` to
 put it somewhere else.
 
 `links/` and `downloaded/` live in the repository and are both gitignored, along
-with `.env` and `*.log`. So is `personal.ini`, which is no longer read, so that
+with `.env`, `searches.toml` ([docs/HARVESTING.md](HARVESTING.md)) and `*.log`. So is `personal.ini`, which is no longer read, so that
 an old one holding a password can never be committed by accident.
 
 ## Questions, and running unattended
@@ -159,6 +159,7 @@ Every command that can change something asks first. Two rules hold everywhere:
 
 | Command | Off a terminal |
 | --- | --- |
+| `harvest_links.py` | Starts: a harvest only adds lines to `links/`. `--yes` does the same at a terminal. |
 | `download_fics.py` | Takes each question's default, logs it, and starts, so a run meant to last days never blocks. `--yes` does the same at a terminal. The defaults never download a finished work you already own. |
 | `send_to_server.py`, `backup_server.py` | Refuse to start and say why. They take no flags, so their questions are the only way to say yes, and a yes to changing the server is never assumed. |
 | `start_here.py` | Lists what the project does and exits. |
