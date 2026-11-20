@@ -20,11 +20,11 @@ registered with the logger on load, which redacts them from every later line,
 including the ones written to the failure log.
 
 ```sh
-# AO3, for download_fics.py
+# AO3, for harvest_links.py and download_fics.py
 AO3_USERNAME=
 AO3_PASSWORD=
 
-# BookOrbit, for send_to_server.py and download_fics.py
+# BookOrbit, for send_to_server.py, harvest_links.py and download_fics.py
 BOOKORBIT_URL=
 BOOKORBIT_USERNAME=
 BOOKORBIT_PASSWORD=
@@ -41,16 +41,16 @@ BACKUP_DIR=
 
 | Key | Needed by | Notes |
 | --- | --- | --- |
-| `AO3_USERNAME`, `AO3_PASSWORD` | `download_fics.py`, and the retired backfill's `fetch` and `check-auth` | An ordinary AO3 account. Nothing here posts, comments or kudos. |
-| `BOOKORBIT_URL` | `send_to_server.py`, `download_fics.py`, `bookorbit-sync` | A bare host (`myserver:8080`) or a full API root. Empty means BookOrbit is simply not in use: `send_to_server.py` then stops, and `download_fics.py` treats every work as new. |
-| `BOOKORBIT_USERNAME`, `BOOKORBIT_PASSWORD` | `send_to_server.py`, `download_fics.py`, `bookorbit-sync` | A dedicated account with **Edit metadata** and **Download**, nothing more. See [docs/BOOKORBIT.md](BOOKORBIT.md#credentials). |
-| `BOOKORBIT_TOKEN` | `send_to_server.py`, `download_fics.py`, `bookorbit-sync` | An `accessToken` instead of an account. Expires after `JWT_EXPIRES_IN`, 15 minutes by default. |
-| `BOOKORBIT_LIBRARY_ID` | `send_to_server.py`, `download_fics.py`, `bookorbit-sync` | Look at one BookOrbit library only. Optional. |
+| `AO3_USERNAME`, `AO3_PASSWORD` | `harvest_links.py`, `download_fics.py`, and the retired backfill's `fetch` and `check-auth` | An ordinary AO3 account. Nothing here posts, comments or kudos. |
+| `BOOKORBIT_URL` | `send_to_server.py`, `harvest_links.py`, `download_fics.py`, `bookorbit-sync` | A bare host (`myserver:8080`) or a full API root. Empty means BookOrbit is simply not in use: `send_to_server.py` then stops, and `harvest_links.py` and `download_fics.py` treat every work as new. |
+| `BOOKORBIT_USERNAME`, `BOOKORBIT_PASSWORD` | `send_to_server.py`, `harvest_links.py`, `download_fics.py`, `bookorbit-sync` | A dedicated account with **Edit metadata** and **Download**, nothing more. See [docs/BOOKORBIT.md](BOOKORBIT.md#credentials). |
+| `BOOKORBIT_TOKEN` | `send_to_server.py`, `harvest_links.py`, `download_fics.py`, `bookorbit-sync` | An `accessToken` instead of an account. Expires after `JWT_EXPIRES_IN`, 15 minutes by default. |
+| `BOOKORBIT_LIBRARY_ID` | `send_to_server.py`, `harvest_links.py`, `download_fics.py`, `bookorbit-sync` | Look at one BookOrbit library only. Optional. |
 | `SERVER` | `send_to_server.py`, `backup_server.py` | The server's alias in `~/.ssh/config`, such as `myserver`. See [the SSH alias](#the-ssh-alias). |
-| `SERVER_BOOKORBIT_DIR` | `send_to_server.py`, `backup_server.py` | BookOrbit's folder on the server, as an absolute path such as `/path/to/bookorbit`. The backup copies all of it. |
-| `SERVER_LIBRARY_DIR` | `send_to_server.py` | The folder inside `SERVER_BOOKORBIT_DIR` that new books are added to, such as `/path/to/bookorbit/fanfiction`. It must be inside it, so the backup covers everything sent. |
+| `SERVER_BOOKORBIT_DIR` | `send_to_server.py`, `backup_server.py` | BookOrbit's folder on the server, the one holding its `docker-compose.yml`, as an absolute path such as `/path/to/bookorbit`. The backup copies all of it. |
+| `SERVER_LIBRARY_DIR` | `send_to_server.py`, `backup_server.py` | The folder on the server that new books are added to, such as `/path/to/books/fanfiction`. It can be inside `SERVER_BOOKORBIT_DIR` or anywhere else, such as another drive; the backup copies it either way. |
 | `BOOKORBIT_LIBRARY_PATH_IN_CONTAINER` | `send_to_server.py` | `SERVER_LIBRARY_DIR` as BookOrbit sees it from inside its container, such as `/books/fanfiction`: the start of the file paths BookOrbit reports. It is how a book BookOrbit holds is found on the server to be replaced in place. |
-| `BACKUP_DIR` | `backup_server.py` | The folder on this PC that holds the backup, such as `~/Backups`. The backup is a folder in it named like `SERVER_BOOKORBIT_DIR`'s own: `~/Backups/bookorbit`. `~` is expanded. |
+| `BACKUP_DIR` | `backup_server.py` | The folder on this PC that holds the backup, such as `~/Backups`. The backup is a folder in it named like `SERVER_BOOKORBIT_DIR`'s own, `~/Backups/bookorbit`, and one named like `SERVER_LIBRARY_DIR`'s when that is elsewhere, beside the database dump `~/Backups/bookorbit-database.sql`. `~` is expanded. |
 
 A line must be `KEY=value`. Quotes around a value are stripped, a line whose
 first character is `#` is a comment, and any key not listed above is ignored — one file can hold settings
@@ -62,7 +62,7 @@ the `=`.
 
 `send_to_server.py` reads `SERVER`, `SERVER_BOOKORBIT_DIR`, `SERVER_LIBRARY_DIR`
 and `BOOKORBIT_LIBRARY_PATH_IN_CONTAINER`, and the BookOrbit settings above;
-`backup_server.py` reads `SERVER`, `SERVER_BOOKORBIT_DIR` and `BACKUP_DIR`.
+`backup_server.py` reads `SERVER`, `SERVER_BOOKORBIT_DIR`, `SERVER_LIBRARY_DIR` and `BACKUP_DIR`.
 Three rules hold for all of them:
 
 - **Only you write them.** No command here ever writes `.env`.

@@ -63,14 +63,14 @@ SETTINGS: tuple[Setting, ...] = (
     Setting(SERVER, "The server's alias in ~/.ssh/config", "myserver", "alias"),
     Setting(
         SERVER_BOOKORBIT_DIR,
-        "BookOrbit's folder on the server; backup_server.py copies all of it",
+        "BookOrbit's folder on the server, holding its docker-compose.yml; backup_server.py copies all of it",
         "/path/to/bookorbit",
         "server",
     ),
     Setting(
         SERVER_LIBRARY_DIR,
-        "The folder on the server that send_to_server.py adds books to, inside SERVER_BOOKORBIT_DIR",
-        "/path/to/bookorbit/fanfiction",
+        "The folder on the server that send_to_server.py adds books to; backup_server.py copies it too",
+        "/path/to/books/fanfiction",
         "server",
     ),
     Setting(
@@ -203,13 +203,6 @@ def load_server_settings(
         )
 
     normalised = {key: _normalise(SETTINGS_BY_KEY[key], values[key]) for key in required}
-    if SERVER_LIBRARY_DIR in normalised and SERVER_BOOKORBIT_DIR in normalised:
-        # A book sent outside the backed-up folder would be a book with no backup.
-        if not PurePosixPath(normalised[SERVER_LIBRARY_DIR]).is_relative_to(normalised[SERVER_BOOKORBIT_DIR]):
-            raise ServerError(
-                f"{SERVER_LIBRARY_DIR} ({normalised[SERVER_LIBRARY_DIR]}) must be inside "
-                f"{SERVER_BOOKORBIT_DIR} ({normalised[SERVER_BOOKORBIT_DIR]}), so the backup covers what is sent"
-            )
     if from_environment:
         source = f"process environment ({', '.join(from_environment)}) over {dotenv_path}"
     else:

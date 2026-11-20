@@ -138,8 +138,10 @@ twice. It deletes nothing: empty `downloaded/` yourself once you are happy.
 python3 backup_server.py
 ```
 
-One rsync pull of `SERVER_BOOKORBIT_DIR` into a folder of the same name in
-`BACKUP_DIR`: `/path/to/bookorbit` becomes `BACKUP_DIR/bookorbit`.
+A dump of BookOrbit's database into `BACKUP_DIR/bookorbit-database.sql`, then
+an rsync pull of `SERVER_BOOKORBIT_DIR` into a folder of the same name in
+`BACKUP_DIR`: `/path/to/bookorbit` becomes `BACKUP_DIR/bookorbit`. If
+`SERVER_LIBRARY_DIR` is somewhere else, it is pulled the same way beside it.
 The first run copies the whole library and can take hours; later runs copy only
 what changed. It deletes nothing on either side, and makes no archive: taking
 the backup on to a drive or a cloud folder is up to you.

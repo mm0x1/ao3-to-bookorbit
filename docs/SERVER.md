@@ -5,7 +5,7 @@ covers the two commands that talk to that server over ssh and rsync:
 
 ```sh
 python3 send_to_server.py    # send downloaded/ to the server, then fill in BookOrbit
-python3 backup_server.py     # copy BookOrbit's folder from the server to this PC
+python3 backup_server.py     # dump BookOrbit's database, copy its folder and the library to this PC
 ```
 
 Neither takes options. Each prints the settings it is using and what it is about
@@ -119,21 +119,41 @@ python3 backup_server.py
 Back up the server
   SERVER                myserver
   SERVER_BOOKORBIT_DIR  /path/to/bookorbit
+  SERVER_LIBRARY_DIR    /path/to/books/fanfiction
   BACKUP_DIR            /home/me/Backups
   settings from         /path/to/ao3-to-bookorbit/.env
+  database dump goes to /home/me/Backups/bookorbit-database.sql
   backup goes into      /home/me/Backups/bookorbit
-  command               rsync -rt --protect-args --stats --info=progress2 myserver:/path/to/bookorbit /home/me/Backups/
+  backup goes into      /home/me/Backups/fanfiction
+  dump command          ssh -o BatchMode=yes -o ConnectTimeout=10 myserver 'docker compose --project-directory /path/to/bookorbit exec -T postgres sh -c '"'"'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"'"'"''
+  command               rsync -rt --protect-args --stats --info=progress2 --exclude=/bookorbit/data/postgres myserver:/path/to/bookorbit /home/me/Backups/
+  command               rsync -rt --protect-args --stats --info=progress2 myserver:/path/to/books/fanfiction /home/me/Backups/
 ========================================================================
 checking that /path/to/bookorbit exists on myserver
+checking that /path/to/books/fanfiction exists on myserver
 Start the backup now? [Y/n]
 ```
 
-That is the whole backup: one `rsync` pull of `SERVER_BOOKORBIT_DIR`, folder and
-all, into `BACKUP_DIR`. The copy is a folder named like the server's —
-`/path/to/bookorbit` becomes `BACKUP_DIR/bookorbit` — holding every folder the
-server's does, so nothing lands loose in `BACKUP_DIR`. There is no archive, no
-database dump and no copying onward — taking the backup to an external drive or
-a cloud folder is up to you.
+That is the whole backup: a dump of BookOrbit's database, an `rsync` pull of
+`SERVER_BOOKORBIT_DIR`, folder and all, into `BACKUP_DIR`, and a second of `SERVER_LIBRARY_DIR` when the books live
+somewhere else, such as another drive. When the library is inside
+`SERVER_BOOKORBIT_DIR` it is already in the first copy, so there is only one
+pull. Each copy is a folder named like the server's — `/path/to/bookorbit`
+becomes `BACKUP_DIR/bookorbit` — holding every folder the server's does, so
+nothing lands loose in `BACKUP_DIR`. Two folders with the same last name would
+mix in one copy, so that is refused. There is no archive and no copying onward —
+taking the backup to an external drive or a cloud folder is up to you.
+
+**The database is dumped, not copied.** Postgres's own files, in
+`SERVER_BOOKORBIT_DIR/data/postgres`, are left out of the rsync: they belong to
+the database's user, so the SSH user usually cannot read them, and a copy taken
+while the database runs may not be one Postgres can start from. Instead
+`pg_dump` runs inside BookOrbit's `postgres` service, and its output comes over
+SSH straight into `BACKUP_DIR/bookorbit-database.sql`; nothing is written on
+the server. The dump runs first, since it takes seconds. If it fails, or ends
+without Postgres's "dump complete" line, nothing is copied and the previous dump
+is kept. To restore, load the file into an empty database with
+`psql -U <user> -d <database> -f bookorbit-database.sql` inside the container.
 
 - **The first run copies everything**, which for a large library is many
   gigabytes and can take hours. Later runs copy only what changed. Nothing puts
@@ -144,8 +164,8 @@ a cloud folder is up to you.
 - **If `BACKUP_DIR` does not exist yet**, it asks before creating it, and the
   answer defaults to no: a folder that is not there is more often a typo than a
   first run.
-- **If `SERVER_BOOKORBIT_DIR` does not exist on the server**, or the server
-  cannot be reached, it says so and copies nothing.
+- **If `SERVER_BOOKORBIT_DIR` or `SERVER_LIBRARY_DIR` does not exist on the
+  server**, or the server cannot be reached, it says so and copies nothing.
 - **Stopping it with Ctrl-C is safe.** The server is only ever read from, and
   the next run carries on from what was already copied.
 

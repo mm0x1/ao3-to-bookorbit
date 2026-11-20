@@ -119,11 +119,10 @@ class LibraryPathTest(unittest.TestCase):
             with self.assertRaises(server.ServerError, msg=path):
                 server.host_path(path, self.settings())
 
-    def test_the_library_must_sit_inside_the_folder_the_backup_covers(self):
-        with self.assertRaises(server.ServerError) as caught:
-            self.settings(library="/srv/elsewhere/fanfiction")
+    def test_the_library_may_sit_outside_bookorbits_folder_since_the_backup_copies_it_too(self):
+        found = server.host_path("/books/fanfiction/1.epub", self.settings(library="/mnt/disk/books/fanfiction"))
 
-        self.assertIn("backup", str(caught.exception))
+        self.assertEqual(found, PurePosixPath("/mnt/disk/books/fanfiction/1.epub"))
 
 
 class CommandTest(unittest.TestCase):

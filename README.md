@@ -42,8 +42,8 @@ server; you empty `downloaded/` yourself.
 - **A send adds new works and replaces owned ones in place**, at the book's own
   path, so BookOrbit keeps it as the same book. Replacing is asked separately,
   and defaults to no.
-- **The backup is one rsync pull** of BookOrbit's whole folder: no archive, no
-  database dump, nothing clever.
+- **The backup is a database dump and an rsync pull** of BookOrbit's folder,
+  and of the library too when it lives elsewhere: no archive, nothing clever.
 
 ## What it looks like
 
